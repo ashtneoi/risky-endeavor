@@ -23,8 +23,8 @@ tr_beq:
 
             addi out, x0, #n1100011
             ; rs1 (r1) -> 19:15
-            slli xF, in, 31-23
-            srli xF, xF, 31-23+20
+            slli xF, in, #8 ; 31-23
+            srli xF, xF, #28 ; 31-23+20
             slli xF, xF, 15
             or out, out, xF
             ; rs2 (r2) -> 24:20
@@ -55,18 +55,22 @@ tr_beq:
             ; send
             ;jalr x0, 0(ra)
 
+0000'0000   inval
+
 write:
 
-0200'0113   addi x2, x0, #20        020 00+0 10+13
-0000'000F   fence                   0 0 0 00+0 00+0F
-0050'8203   lb x4, 5(x1)            005 08+0 20+03
-0022'7233   and x4, x4, x2          00+02 20+7 20+33
-FE02'0CE3   beq x4, x0, -2insn      FE+00 20+0 C8+63
-0000'000F   fence                   0 0 0 00+0 00+0F
-0030'8023   sb x3, 0(x1)            00+03 08+0 00+23
-            lui xF, #8000'0
-            jalr x0, 0(xF)
-0000'0000   inval
+;0200'0113   addi x2, x0, #20        020 00+0 10+13
+;0000'000F   fence                   0 0 0 00+0 00+0F
+;0050'8203   lb x4, 5(x1)            005 08+0 20+03
+;0022'7233   and x4, x4, x2          00+02 20+7 20+33
+;FE02'0CE3   beq x4, x0, -2insn      FE+00 20+0 C8+63
+;0000'000F   fence                   0 0 0 00+0 00+0F
+;0030'8023   sb x3, 0(x1)            00+03 08+0 00+23
+;
+;
+;8000'07B7   lui xF, #8000'0         8000'0 78+37
+;            jalr x0, 0(xF)
+;0000'0000   inval
 
 
 ; 26 insns, so 7 bits (128 bytes, 32 insns) is fine
