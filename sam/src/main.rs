@@ -103,7 +103,6 @@ fn main() {
                 InsnType::J => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
-                    println!("rd = {}", rd);
                     let imm = parts.next().expect("missing imm21");
                     let imm = from_hex(imm, 21).unwrap();
                     if imm & 0x3 != 0 {
