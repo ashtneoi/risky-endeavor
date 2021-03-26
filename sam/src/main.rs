@@ -19,14 +19,14 @@ fn parse_reg(s: &str) -> Result<u32, String> {
     let s = &s["x".len()..];
     let mut n: u32 = 0;
     for c in s.chars() {
-        if n >= 32 {
-            return Err("number is larger than 5 bits".to_string());
-        }
-        n <<= 10;
+        n *= 10;
         n += match c {
             '0'..='9' => c as u32 - '0' as u32,
             _ => return Err(format!("invalid decimal digit '{}'", c)),
         };
+        if n >= 32 {
+            return Err("number is larger than 5 bits".to_string());
+        }
     }
     Ok(n)
 }
@@ -71,6 +71,8 @@ fn main() {
 
     let mut mnemonics = HashMap::new();
     mnemonics.insert("lui", (InsnType::U, 0x0000_0037));
+    mnemonics.insert("auipc", (InsnType::U, 0x0000_0017));
+    mnemonics.insert("jal", (InsnType::J, 0x0000_006F));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
@@ -97,6 +99,21 @@ fn main() {
                     let imm = parts.next().expect("missing imm20");
                     let imm = from_hex(imm, 20).unwrap();
                     insn += (rd << 7) + (imm << 12);
+                },
+                InsnType::J => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    println!("rd = {}", rd);
+                    let imm = parts.next().expect("missing imm21");
+                    let imm = from_hex(imm, 21).unwrap();
+                    if imm & 0x3 != 0 {
+                        panic!("last two bits must be 0");
+                    }
+                    insn += rd << 7;
+                    insn += imm << (31-20) >> (31-20+20) << 31;
+                    insn += imm << (31-10) >> (31-10+1) << 21;
+                    insn += imm << (31-11) >> (31-11+11) << 20;
+                    insn += imm << (31-19) >> (31-19+12) << 12;
                 },
                 _ => todo!(),
             }
