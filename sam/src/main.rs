@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::env;
+use std::fs;
 use std::io::{self, prelude::*};
 
 #[derive(Clone, Copy)]
@@ -70,15 +72,26 @@ fn main() {
     let mut labels = HashMap::new();
 
     let mut mnemonics = HashMap::new();
-    mnemonics.insert("lui", (InsnType::U, 0x0000_0037));
-    mnemonics.insert("auipc", (InsnType::U, 0x0000_0017));
-    mnemonics.insert("jal", (InsnType::J, 0x0000_006F));
+    mnemonics.insert(  "lui", (InsnType::U,    0x0000_0037));
+    mnemonics.insert("auipc", (InsnType::U,    0x0000_0017));
+    mnemonics.insert(  "jal", (InsnType::J,    0x0000_006F));
+    mnemonics.insert( "jalr", (InsnType::I,    0x0000_0067));
+    mnemonics.insert(  "beq", (InsnType::B,    0x0000_0063));
+    mnemonics.insert(   "lb", (InsnType::I,    0x0000_0003));
+    mnemonics.insert(   "sb", (InsnType::S,    0x0000_0023));
+    mnemonics.insert( "slli", (InsnType::Sxli, 0x0000_1013));
+    mnemonics.insert(  "add", (InsnType::R,    0x0000_0033));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
-    let stdin_unlocked = io::stdin();
-    let stdin = stdin_unlocked.lock();
-    for line in stdin.lines() {
+    let args: Vec<_> = env::args_os().collect();
+    assert_eq!(args.len(), 2);
+    let mut f = fs::File::open(&args[1]).unwrap();
+
+    // Get an early error if the input file isn't seekable.
+    f.seek(io::SeekFrom::Start(0)).unwrap();
+
+    for line in io::BufReader::new(&f).lines() {
         let line = line.unwrap();
         if line.starts_with('$') {
             // label
@@ -88,11 +101,86 @@ fn main() {
             // nothing
         } else {
             // instruction
+            addr += 4;
+        }
+    }
+
+    addr = 0;
+    f.seek(io::SeekFrom::Start(0)).unwrap();
+
+    for line in io::BufReader::new(&f).lines() {
+        let line = line.unwrap();
+        if line.starts_with('$') {
+            // label
+        } else if line.chars().all(|c| c.is_ascii_whitespace()) {
+            // nothing
+        } else {
+            // instruction
             let mut parts = line.split_ascii_whitespace();
             let mnemonic = parts.next().expect("missing mnemonic");
             let (insn_type, template) = mnemonics[&mnemonic];
             let mut insn = template;
             match insn_type {
+                InsnType::R => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let rs2 = parts.next().expect("missing rs2");
+                    let rs2 = parse_reg(rs2).unwrap();
+                    insn += (rd << 7) + (rs1 << 15) + (rs2 << 20);
+                },
+                InsnType::Sxli => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let imm = parts.next().expect("missing imm5");
+                    let imm = from_hex(imm, 5).unwrap();
+                    insn += (rd << 7) + (rs1 << 15) + (imm << 20);
+                },
+                InsnType::I => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let imm = parts.next().expect("missing imm12");
+                    let imm = from_hex(imm, 12).unwrap();
+                    insn += (rd << 7) + (rs1 << 15) + (imm << 20);
+                },
+                InsnType::S => {
+                    let rs2 = parts.next().expect("missing rs2");
+                    let rs2 = parse_reg(rs2).unwrap();
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let imm = parts.next().expect("missing imm12");
+                    let imm = from_hex(imm, 12).unwrap();
+                    insn += (rs1 << 15) + (rs2 << 20);
+                    insn += imm << (31-11) >> (31-11+5) << 25;
+                    insn += imm << (31-4) >> (31-4+0) << 0;
+                },
+                InsnType::B => {
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let rs2 = parts.next().expect("missing rs2");
+                    let rs2 = parse_reg(rs2).unwrap();
+                    let imm_str = parts.next().expect("missing imm13");
+                    let imm = if imm_str.starts_with('#')
+                            || imm_str.starts_with('-') {
+                        let imm = from_hex(imm_str, 13).unwrap();
+                        if imm & 0x3 != 0 {
+                            panic!("last two bits of imm13 must be 0");
+                        }
+                        imm
+                    } else {
+                        labels[imm_str].wrapping_sub(addr)
+                    };
+                    insn += (rs1 << 15) + (rs2 << 20);
+                    insn += imm << (31-12) >> (31-12+12) << 31;
+                    insn += imm << (31-10) >> (31-10+5) << 25;
+                    insn += imm << (31-4) >> (31-4+1) << 8;
+                    insn += imm << (31-11) >> (31-11+11) << 7;
+                },
                 InsnType::U => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
@@ -103,19 +191,25 @@ fn main() {
                 InsnType::J => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
-                    let imm = parts.next().expect("missing imm21");
-                    let imm = from_hex(imm, 21).unwrap();
-                    if imm & 0x3 != 0 {
-                        panic!("last two bits must be 0");
-                    }
+                    let imm_str = parts.next().expect("missing imm21");
+                    let imm = if imm_str.starts_with('#')
+                            || imm_str.starts_with('-') {
+                        let imm = from_hex(imm_str, 21).unwrap();
+                        if imm & 0x3 != 0 {
+                            panic!("last two bits of imm21 must be 0");
+                        }
+                        imm
+                    } else {
+                        labels[imm_str].wrapping_sub(addr)
+                    };
                     insn += rd << 7;
                     insn += imm << (31-20) >> (31-20+20) << 31;
                     insn += imm << (31-10) >> (31-10+1) << 21;
                     insn += imm << (31-11) >> (31-11+11) << 20;
                     insn += imm << (31-19) >> (31-19+12) << 12;
                 },
-                _ => todo!(),
             }
+            assert_eq!(parts.next(), None, "trailing operands");
             println!(
                 "{:04X}'{:04X}: {:04X}'{:04X}",
                 addr >> 16,
