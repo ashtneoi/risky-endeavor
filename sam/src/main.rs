@@ -116,7 +116,6 @@ fn main() {
                 },
                 _ => todo!(),
             }
-            addr += 4;
             println!(
                 "{:04X}'{:04X}: {:04X}'{:04X}",
                 addr >> 16,
@@ -124,6 +123,7 @@ fn main() {
                 insn >> 16,
                 insn & 0xFFFF,
             );
+            addr += 4;
         }
     }
 }
