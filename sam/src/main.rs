@@ -5,6 +5,7 @@ use std::io::{self, prelude::*};
 
 #[derive(Clone, Copy)]
 enum InsnType {
+    X,  // inherent
     R,
     I,
     S,
@@ -12,6 +13,7 @@ enum InsnType {
     U,
     J,
     Sxli,
+    F, // fence
 }
 
 fn parse_reg(s: &str) -> Result<u32, String> {
@@ -29,6 +31,24 @@ fn parse_reg(s: &str) -> Result<u32, String> {
         if n >= 32 {
             return Err("number is larger than 5 bits".to_string());
         }
+    }
+    Ok(n)
+}
+
+fn parse_pred_succ(s: &str) -> Result<u32, String> {
+    let mut n = 0;
+    for c in s.chars() {
+        let b = match c {
+            'i' => 0x8,
+            'o' => 0x4,
+            'r' => 0x2,
+            'w' => 0x1,
+            _ => return Err(format!("invalid pred/succ char '{}'", c)),
+        };
+        if n & b != 0 {
+            return Err(format!("duplicate '{}'", c));
+        }
+        n += b;
     }
     Ok(n)
 }
@@ -72,6 +92,7 @@ fn main() {
     let mut labels = HashMap::new();
 
     let mut mnemonics = HashMap::new();
+    mnemonics.insert("inval", (InsnType::X,    0x0000_0000));
     mnemonics.insert(  "lui", (InsnType::U,    0x0000_0037));
     mnemonics.insert("auipc", (InsnType::U,    0x0000_0017));
     mnemonics.insert(  "jal", (InsnType::J,    0x0000_006F));
@@ -79,8 +100,13 @@ fn main() {
     mnemonics.insert(  "beq", (InsnType::B,    0x0000_0063));
     mnemonics.insert(   "lb", (InsnType::I,    0x0000_0003));
     mnemonics.insert(   "sb", (InsnType::S,    0x0000_0023));
+    mnemonics.insert( "addi", (InsnType::I,    0x0000_0013));
     mnemonics.insert( "slli", (InsnType::Sxli, 0x0000_1013));
+    mnemonics.insert( "srli", (InsnType::Sxli, 0x0000_5013));
     mnemonics.insert(  "add", (InsnType::R,    0x0000_0033));
+    mnemonics.insert(   "or", (InsnType::R,    0x0000_6033));
+    mnemonics.insert(  "and", (InsnType::R,    0x0000_7033));
+    mnemonics.insert("fence", (InsnType::F,    0x0000_000F));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
@@ -121,6 +147,9 @@ fn main() {
             let (insn_type, template) = mnemonics[&mnemonic];
             let mut insn = template;
             match insn_type {
+                InsnType::X => {
+                    // already done
+                },
                 InsnType::R => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
@@ -207,6 +236,13 @@ fn main() {
                     insn += imm << (31-10) >> (31-10+1) << 21;
                     insn += imm << (31-11) >> (31-11+11) << 20;
                     insn += imm << (31-19) >> (31-19+12) << 12;
+                },
+                InsnType::F => {
+                    let pred = parts.next().expect("missing pred");
+                    let pred = parse_pred_succ(pred).unwrap();
+                    let succ = parts.next().expect("missing succ");
+                    let succ = parse_pred_succ(succ).unwrap();
+                    insn += (pred << 24) + (succ << 20);
                 },
             }
             assert_eq!(parts.next(), None, "trailing operands");
