@@ -154,6 +154,9 @@ fn main() {
         if line.starts_with('$') {
             // label
             let label = line["$".len()..].to_string();
+            if labels.contains_key(&label) {
+                panic!("duplicate label '{}'", &label);
+            }
             labels.insert(label, addr);
         } else if line.chars().all(|c| c.is_ascii_whitespace()) {
             // nothing
