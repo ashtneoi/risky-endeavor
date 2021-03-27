@@ -14,25 +14,46 @@ enum InsnType {
     J,
     Sxli,
     F, // fence
+    C, // csr??
+    Ci, // csr??i
 }
 
 fn parse_reg(s: &str) -> Result<u32, String> {
-    if !s.starts_with('x') {
-        return Err("invalid register".to_string());
-    }
-    let s = &s["x".len()..];
-    let mut n: u32 = 0;
-    for c in s.chars() {
-        n *= 10;
-        n += match c {
-            '0'..='9' => c as u32 - '0' as u32,
-            _ => return Err(format!("invalid decimal digit '{}'", c)),
-        };
-        if n >= 32 {
-            return Err("number is larger than 5 bits".to_string());
-        }
-    }
-    Ok(n)
+    Ok(match s {
+        "zero" => 0,
+        "ra" => 1,
+        "sp" => 2,
+        "gp" => 3,
+        "tp" => 4,
+        "fp" => 8,
+        _ => {
+            let mut cc = s.chars();
+            let prefix = cc.next().unwrap();
+            if !"xtsa".contains(prefix) {
+                return Err(format!("invalid register prefix '{}'", prefix));
+            }
+            let mut n: u32 = 0;
+            for c in cc {
+                n *= 10;
+                n += match c {
+                    '0'..='9' => c as u32 - '0' as u32,
+                    _ => return Err(format!("invalid decimal digit '{}'", c)),
+                };
+                if n > 31 {
+                    return Err("no such register".to_string());
+                }
+            }
+            match (prefix, n) {
+                ('x', 0..=31) => n,
+                ('t', 0..=2) => 5 + n,
+                ('s', 0..=1) => 8 + n,
+                ('a', 0..=7) => 10 + n,
+                ('s', 2..=11) => 18 + n - 2,
+                ('t', 3..=6) => 28 + n - 3,
+                _ => return Err("no such register".to_string()),
+            }
+        },
+    })
 }
 
 fn parse_pred_succ(s: &str) -> Result<u32, String> {
@@ -92,21 +113,30 @@ fn main() {
     let mut labels = HashMap::new();
 
     let mut mnemonics = HashMap::new();
-    mnemonics.insert("inval", (InsnType::X,    0x0000_0000));
-    mnemonics.insert(  "lui", (InsnType::U,    0x0000_0037));
-    mnemonics.insert("auipc", (InsnType::U,    0x0000_0017));
-    mnemonics.insert(  "jal", (InsnType::J,    0x0000_006F));
-    mnemonics.insert( "jalr", (InsnType::I,    0x0000_0067));
-    mnemonics.insert(  "beq", (InsnType::B,    0x0000_0063));
-    mnemonics.insert(   "lb", (InsnType::I,    0x0000_0003));
-    mnemonics.insert(   "sb", (InsnType::S,    0x0000_0023));
-    mnemonics.insert( "addi", (InsnType::I,    0x0000_0013));
-    mnemonics.insert( "slli", (InsnType::Sxli, 0x0000_1013));
-    mnemonics.insert( "srli", (InsnType::Sxli, 0x0000_5013));
-    mnemonics.insert(  "add", (InsnType::R,    0x0000_0033));
-    mnemonics.insert(   "or", (InsnType::R,    0x0000_6033));
-    mnemonics.insert(  "and", (InsnType::R,    0x0000_7033));
-    mnemonics.insert("fence", (InsnType::F,    0x0000_000F));
+    mnemonics.insert( "inval", (InsnType::X,    0x0000_0000));
+    mnemonics.insert(   "lui", (InsnType::U,    0x0000_0037));
+    mnemonics.insert( "auipc", (InsnType::U,    0x0000_0017));
+    mnemonics.insert(   "jal", (InsnType::J,    0x0000_006F));
+    mnemonics.insert(  "jalr", (InsnType::I,    0x0000_0067));
+    mnemonics.insert(   "ret", (InsnType::X,    0x0000_8067));
+    mnemonics.insert(   "beq", (InsnType::B,    0x0000_0063));
+    mnemonics.insert(   "blt", (InsnType::B,    0x0000_4063));
+    mnemonics.insert(    "lb", (InsnType::I,    0x0000_0003));
+    mnemonics.insert(    "lh", (InsnType::I,    0x0000_1003));
+    mnemonics.insert(    "lw", (InsnType::I,    0x0000_2003));
+    mnemonics.insert(    "sb", (InsnType::S,    0x0000_0023));
+    mnemonics.insert(    "sh", (InsnType::S,    0x0000_1023));
+    mnemonics.insert(    "sw", (InsnType::S,    0x0000_2023));
+    mnemonics.insert(  "addi", (InsnType::I,    0x0000_0013));
+    mnemonics.insert(  "andi", (InsnType::I,    0x0000_7013));
+    mnemonics.insert(  "slli", (InsnType::Sxli, 0x0000_1013));
+    mnemonics.insert(  "srli", (InsnType::Sxli, 0x0000_5013));
+    mnemonics.insert(   "add", (InsnType::R,    0x0000_0033));
+    mnemonics.insert(    "or", (InsnType::R,    0x0000_6033));
+    mnemonics.insert(   "and", (InsnType::R,    0x0000_7033));
+    mnemonics.insert( "fence", (InsnType::F,    0x0000_000F));
+    mnemonics.insert( "csrrc", (InsnType::C,    0x0000_3073));
+    mnemonics.insert("csrrsi", (InsnType::Ci,   0x0000_6073));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
@@ -146,7 +176,8 @@ fn main() {
             // instruction
             let mut parts = line.split_ascii_whitespace();
             let mnemonic = parts.next().expect("missing mnemonic");
-            let (insn_type, template) = mnemonics[&mnemonic];
+            let (insn_type, template) = *mnemonics.get(&mnemonic)
+                .unwrap_or_else(|| panic!("unknown mnemonic '{}'", &mnemonic));
             let mut insn = template;
             match insn_type {
                 InsnType::X => {
@@ -188,7 +219,7 @@ fn main() {
                     let imm = from_hex(imm, 12).unwrap();
                     insn += (rs1 << 15) + (rs2 << 20);
                     insn += imm << (31-11) >> (31-11+5) << 25;
-                    insn += imm << (31-4) >> (31-4+0) << 0;
+                    insn += imm << (31-4) >> (31-4+0) << 7;
                 },
                 InsnType::B => {
                     let rs1 = parts.next().expect("missing rs1");
@@ -204,7 +235,9 @@ fn main() {
                         }
                         imm
                     } else {
-                        labels[imm_str].wrapping_sub(addr)
+                        let label_addr = labels.get(imm_str).unwrap_or_else(
+                            || panic!("unknown label '{}'", imm_str));
+                        label_addr.wrapping_sub(addr)
                     };
                     insn += (rs1 << 15) + (rs2 << 20);
                     insn += imm << (31-12) >> (31-12+12) << 31;
@@ -231,7 +264,9 @@ fn main() {
                         }
                         imm
                     } else {
-                        labels[imm_str].wrapping_sub(addr)
+                        let label_addr = labels.get(imm_str).unwrap_or_else(
+                            || panic!("unknown label '{}'", imm_str));
+                        label_addr.wrapping_sub(addr)
                     };
                     insn += rd << 7;
                     insn += imm << (31-20) >> (31-20+20) << 31;
@@ -246,9 +281,34 @@ fn main() {
                     let succ = parse_pred_succ(succ).unwrap();
                     insn += (pred << 24) + (succ << 20);
                 },
+                InsnType::C => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    let rs1 = parts.next().expect("missing rs1");
+                    let rs1 = parse_reg(rs1).unwrap();
+                    let csr = parts.next().expect("missing csr");
+                    let csr = from_hex(csr, 12).unwrap();
+                    insn += (rd << 7) + (rs1 << 15) + (csr << 20);
+                },
+                InsnType::Ci => {
+                    let rd = parts.next().expect("missing rd");
+                    let rd = parse_reg(rd).unwrap();
+                    let uimm = parts.next().expect("missing uimm5");
+                    let uimm = from_hex(uimm, 5).unwrap();
+                    let csr = parts.next().expect("missing csr");
+                    let csr = from_hex(csr, 12).unwrap();
+                    insn += (rd << 7) + (uimm << 15) + (csr << 20);
+                },
             }
             assert_eq!(parts.next(), None, "trailing operands");
             output.write_all(&insn.to_le_bytes()).unwrap();
+            println!(
+                "{:04X}'{:04X}: {:04X}'{:04X}",
+                addr >> 16,
+                addr & 0xFFFF,
+                insn >> 16,
+                insn & 0xFFFF,
+            );
             addr += 4;
         }
     }
