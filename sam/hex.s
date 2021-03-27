@@ -69,10 +69,10 @@ $lt_A
 $write
             lui t0 #1000'0
             addi t1 x0 #20
-            fence iorw iorw
+            fence io i
             lb t2 t0 #5
             and t2 t2 t1
             beq t2 x0 -#8
-            fence iorw iorw
+            fence i o
             sb a0 t0 #0
             ret
