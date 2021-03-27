@@ -110,14 +110,16 @@ fn main() {
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
+
     let args: Vec<_> = env::args_os().collect();
-    assert_eq!(args.len(), 2);
-    let mut f = fs::File::open(&args[1]).unwrap();
+    assert_eq!(args.len(), 3);
+    let mut input = fs::File::open(&args[1]).unwrap();
+    let mut output = fs::File::create(&args[2]).unwrap();
 
     // Get an early error if the input file isn't seekable.
-    f.seek(io::SeekFrom::Start(0)).unwrap();
+    input.seek(io::SeekFrom::Start(0)).unwrap();
 
-    for line in io::BufReader::new(&f).lines() {
+    for line in io::BufReader::new(&input).lines() {
         let line = line.unwrap();
         if line.starts_with('$') {
             // label
@@ -132,9 +134,9 @@ fn main() {
     }
 
     addr = 0;
-    f.seek(io::SeekFrom::Start(0)).unwrap();
+    input.seek(io::SeekFrom::Start(0)).unwrap();
 
-    for line in io::BufReader::new(&f).lines() {
+    for line in io::BufReader::new(&input).lines() {
         let line = line.unwrap();
         if line.starts_with('$') {
             // label
@@ -246,14 +248,10 @@ fn main() {
                 },
             }
             assert_eq!(parts.next(), None, "trailing operands");
-            println!(
-                "{:04X}'{:04X}: {:04X}'{:04X}",
-                addr >> 16,
-                addr & 0xFFFF,
-                insn >> 16,
-                insn & 0xFFFF,
-            );
+            output.write_all(&insn.to_le_bytes()).unwrap();
             addr += 4;
         }
     }
+
+    output.sync_data().unwrap();
 }
