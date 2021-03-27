@@ -159,8 +159,13 @@ fn main() {
     // Get an early error if the input file isn't seekable.
     input.seek(io::SeekFrom::Start(0)).unwrap();
 
-    for line in io::BufReader::new(&input).lines() {
-        let line = line.unwrap();
+    for line_full in io::BufReader::new(&input).lines() {
+        let line_full = line_full.unwrap();
+        let line_trimmed = line_full.trim_start();
+        let line = match line_trimmed.find(';') {
+            Some(comment_start) => &line_trimmed[..comment_start],
+            None => line_trimmed,
+        };
         if line.starts_with('$') {
             // label
             let label = line["$".len()..].to_string();
@@ -168,7 +173,7 @@ fn main() {
                 panic!("duplicate label '{}'", &label);
             }
             labels.insert(label, addr);
-        } else if line.chars().all(|c| c.is_ascii_whitespace()) {
+        } else if line.is_empty() {
             // nothing
         } else {
             // instruction
@@ -179,11 +184,16 @@ fn main() {
     addr = 0;
     input.seek(io::SeekFrom::Start(0)).unwrap();
 
-    for line in io::BufReader::new(&input).lines() {
-        let line = line.unwrap();
+    for line_full in io::BufReader::new(&input).lines() {
+        let line_full = line_full.unwrap();
+        let line_trimmed = line_full.trim_start();
+        let line = match line_trimmed.find(';') {
+            Some(comment_start) => &line_trimmed[..comment_start],
+            None => line_trimmed,
+        };
         if line.starts_with('$') {
             // label
-        } else if line.chars().all(|c| c.is_ascii_whitespace()) {
+        } else if line.is_empty() {
             // nothing
         } else {
             // instruction
