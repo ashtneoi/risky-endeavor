@@ -120,7 +120,9 @@ fn main() {
     mnemonics.insert(  "jalr", (InsnType::I,    0x0000_0067));
     mnemonics.insert(   "ret", (InsnType::X,    0x0000_8067));
     mnemonics.insert(   "beq", (InsnType::B,    0x0000_0063));
+    mnemonics.insert(   "bne", (InsnType::B,    0x0000_1063));
     mnemonics.insert(   "blt", (InsnType::B,    0x0000_4063));
+    mnemonics.insert(  "bltu", (InsnType::B,    0x0000_6063));
     mnemonics.insert(    "lb", (InsnType::I,    0x0000_0003));
     mnemonics.insert(    "lh", (InsnType::I,    0x0000_1003));
     mnemonics.insert(    "lw", (InsnType::I,    0x0000_2003));
@@ -128,10 +130,13 @@ fn main() {
     mnemonics.insert(    "sh", (InsnType::S,    0x0000_1023));
     mnemonics.insert(    "sw", (InsnType::S,    0x0000_2023));
     mnemonics.insert(  "addi", (InsnType::I,    0x0000_0013));
+    mnemonics.insert(   "nop", (InsnType::X,    0x0000_0013));
     mnemonics.insert(  "andi", (InsnType::I,    0x0000_7013));
     mnemonics.insert(  "slli", (InsnType::Sxli, 0x0000_1013));
     mnemonics.insert(  "srli", (InsnType::Sxli, 0x0000_5013));
     mnemonics.insert(   "add", (InsnType::R,    0x0000_0033));
+    mnemonics.insert(   "sub", (InsnType::R,    0x4000_0033));
+    mnemonics.insert(  "sltu", (InsnType::R,    0x0000_3033));
     mnemonics.insert(    "or", (InsnType::R,    0x0000_6033));
     mnemonics.insert(   "and", (InsnType::R,    0x0000_7033));
     mnemonics.insert( "fence", (InsnType::F,    0x0000_000F));
@@ -144,7 +149,12 @@ fn main() {
     let args: Vec<_> = env::args_os().collect();
     assert_eq!(args.len(), 3);
     let mut input = fs::File::open(&args[1]).unwrap();
-    let mut output = fs::File::create(&args[2]).unwrap();
+    let mut output;
+    if &args[2] == "-" {
+        output = None;
+    } else {
+        output = Some(fs::File::create(&args[2]).unwrap());
+    }
 
     // Get an early error if the input file isn't seekable.
     input.seek(io::SeekFrom::Start(0)).unwrap();
@@ -241,6 +251,7 @@ fn main() {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
                         label_addr.wrapping_sub(addr)
+                        // FIXME: detect out-of-range labels
                     };
                     insn += (rs1 << 15) + (rs2 << 20);
                     insn += imm << (31-12) >> (31-12+12) << 31;
@@ -270,6 +281,7 @@ fn main() {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
                         label_addr.wrapping_sub(addr)
+                        // FIXME: detect out-of-range labels
                     };
                     insn += rd << 7;
                     insn += imm << (31-20) >> (31-20+20) << 31;
@@ -304,17 +316,20 @@ fn main() {
                 },
             }
             assert_eq!(parts.next(), None, "trailing operands");
-            output.write_all(&insn.to_le_bytes()).unwrap();
-            println!(
-                "{:04X}'{:04X}: {:04X}'{:04X}",
-                addr >> 16,
-                addr & 0xFFFF,
-                insn >> 16,
-                insn & 0xFFFF,
-            );
+            if let Some(ref mut output) = output {
+                output.write_all(&insn.to_le_bytes()).unwrap();
+            } else {
+                println!(
+                    "{:04X}'{:04X}: {:04X}'{:04X}",
+                    addr >> 16,
+                    addr & 0xFFFF,
+                    insn >> 16,
+                    insn & 0xFFFF,
+                );
+            }
             addr += 4;
         }
     }
 
-    output.sync_data().unwrap();
+    output.map(|o| o.sync_data().unwrap());
 }
