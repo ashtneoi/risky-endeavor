@@ -83,6 +83,7 @@ impl MemOp {
 
 fn main() {
     let x = vec![
+        MemOp::calc(2, 1, 1, 0),
         MemOp::calc(1, 0, 0, 0x200),
         MemOp::calc(2, 0, 0, 0x41),
         MemOp::calc(3, 0, 0, 0),
@@ -94,19 +95,23 @@ fn main() {
         let j_src_addr = x[j].src_addr();
         let j_src_data = x[j].src_data();
         if j_src_addr.is_some() || !j_src_data.is_empty() {
+            let mut dests_found = Vec::new();
             for i in (0..j).rev() {
                 if let Some(d) = x[i].dest() {
                     if let Some(sa) = j_src_addr {
-                        if d == sa {
+                        if d == sa && !dests_found.contains(&d) {
                             println!(
-                                "possible direct syn addr dep at {} on {}",
+                                "direct syn addr dep at {} on {}",
                                 j, i);
                         }
                     }
-                    if j_src_data.contains(&d) {
+
+                    if j_src_data.contains(&d) && !dests_found.contains(&d) {
                         println!(
-                            "possible direct syn data dep at {} on {}", j, i);
+                            "direct syn data dep at {} on {}", j, i);
                     }
+
+                    dests_found.push(d);
                 }
             }
         }
