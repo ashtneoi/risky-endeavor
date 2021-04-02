@@ -81,6 +81,40 @@ impl MemOp {
     }
 }
 
+struct SyntacticDeps {
+    addr: Vec<(usize, usize, u32)>, // at, on, reg
+    data: Vec<(usize, usize, u32)>, // at, on, reg
+}
+
+fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
+    let mut deps = SyntacticDeps { addr: Vec::new(), data: Vec::new() };
+
+    for j in (0..mem_ops.len()).rev() {
+        let j_src_addr = mem_ops[j].src_addr();
+        let j_src_data = mem_ops[j].src_data();
+        if j_src_addr.is_some() || !j_src_data.is_empty() {
+            let mut dests_found = Vec::new();
+            for i in (0..j).rev() {
+                if let Some(d) = mem_ops[i].dest() {
+                    if let Some(sa) = j_src_addr {
+                        if d == sa && !dests_found.contains(&d) {
+                            deps.addr.push((j, i, d));
+                        }
+                    }
+
+                    if j_src_data.contains(&d) && !dests_found.contains(&d) {
+                        deps.data.push((j, i, d));
+                    }
+
+                    dests_found.push(d);
+                }
+            }
+        }
+    }
+
+    deps
+}
+
 fn main() {
     let x = vec![
         MemOp::calc(2, 1, 1, 0),
@@ -91,29 +125,13 @@ fn main() {
         MemOp::store(1, 3),
     ];
 
-    for j in (0..x.len()).rev() {
-        let j_src_addr = x[j].src_addr();
-        let j_src_data = x[j].src_data();
-        if j_src_addr.is_some() || !j_src_data.is_empty() {
-            let mut dests_found = Vec::new();
-            for i in (0..j).rev() {
-                if let Some(d) = x[i].dest() {
-                    if let Some(sa) = j_src_addr {
-                        if d == sa && !dests_found.contains(&d) {
-                            println!(
-                                "direct syn addr dep at {} on {}",
-                                j, i);
-                        }
-                    }
-
-                    if j_src_data.contains(&d) && !dests_found.contains(&d) {
-                        println!(
-                            "direct syn data dep at {} on {}", j, i);
-                    }
-
-                    dests_found.push(d);
-                }
-            }
-        }
+    let deps = get_syntactic_deps(&x);
+    println!("direct syntactic address deps:");
+    for (j, i, d) in deps.addr {
+        println!("{} on {}, reg {}", j, i, d);
+    }
+    println!("direct syntactic data deps:");
+    for (j, i, d) in deps.data {
+        println!("{} on {}, reg {}", j, i, d);
     }
 }
