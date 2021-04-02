@@ -1,14 +1,14 @@
-struct Ann {
+pub struct Ann {
     aq: bool,
     rl: bool,
 }
 
-struct OrdSet {
+pub struct OrdSet {
     r: bool,
     w: bool,
 }
 
-enum MemOp {
+pub enum MemOp {
     Load { rd: u32, rx: u32, val: u32 },
     Store { rs: u32, rx: u32 },
     Amo { rd: u32, rx: u32, rs: u32, load_val: u32, store_val: u32 },
@@ -18,20 +18,33 @@ enum MemOp {
     Fence { pred: OrdSet, succ: OrdSet },
 }
 
+impl FromStr for MemOp {
+    type Err = String; // TODO?
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut tokens = s.split_ascii_whitespace();
+        let kind = tokens.next().ok_or_else(Err("missing kind".to_string()))?;
+
+        let arg_count = match kind {
+            "load" => 3,
+            "store" => 2,
+            "amo" => 5,
+            "lr" => 4,
+            "sc" => 3,
+            "calc" => 4,
+            "fence" => 2,
+        };
+        let args: Vec<_> = tokens.take(arg_count).collect();
+        if args.len() < arg_count {
+            return Err("not enough args".to_string());
+        }
+        Ok(match kind {
+            "load" => Load { rd: args[0]
+        })
+    }
+}
+
 impl MemOp {
-    fn load(rd: u32, rx: u32, val: u32) -> Self {
-        Self::Load { rd, rx, val }
-    }
-
-    fn store(rs: u32, rx: u32) -> Self {
-        Self::Store { rs, rx }
-    }
-
-    fn calc(rd: u32, rs1: u32, rs2: u32, val: u32) -> Self {
-        Self::Calc { rd, rs1, rs2, val }
-    }
-
-    fn src_addr(&self) -> Option<u32> {
+    pub fn src_addr(&self) -> Option<u32> {
         use MemOp::*;
         match *self {
             Load { rx, .. } | Store { rx, .. } if rx != 0 => Some(rx),
@@ -41,7 +54,7 @@ impl MemOp {
         }
     }
 
-    fn src_data(&self) -> Vec<u32> {
+    pub fn src_data(&self) -> Vec<u32> {
         use MemOp::*;
         match *self {
             Store { rs, .. } if rs != 0 => vec![rs],
@@ -61,7 +74,7 @@ impl MemOp {
         }
     }
 
-    fn dest(&self) -> Option<u32> {
+    pub fn dest(&self) -> Option<u32> {
         use MemOp::*;
         match *self {
             Load { rd, .. } if rd != 0 => Some(rd),
@@ -72,7 +85,7 @@ impl MemOp {
         }
     }
 
-    fn carries_dep(&self) -> bool {
+    pub fn carries_dep(&self) -> bool {
         use MemOp::*;
         match *self {
             Calc { .. } => true,
@@ -86,7 +99,7 @@ struct SyntacticDeps {
     data: Vec<(usize, usize, u32)>, // at, on, reg
 }
 
-fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
+pub fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
     let mut deps = SyntacticDeps { addr: Vec::new(), data: Vec::new() };
 
     for j in (0..mem_ops.len()).rev() {
@@ -117,12 +130,6 @@ fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
 
 fn main() {
     let x = vec![
-        MemOp::calc(2, 1, 1, 0),
-        MemOp::calc(1, 0, 0, 0x200),
-        MemOp::calc(2, 0, 0, 0x41),
-        MemOp::calc(3, 0, 0, 0),
-        MemOp::calc(3, 2, 0, 0x42),
-        MemOp::store(1, 3),
     ];
 
     let deps = get_syntactic_deps(&x);
