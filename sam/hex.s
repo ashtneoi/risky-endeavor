@@ -1,10 +1,12 @@
             lui sp #8000'1
 
 $get_time
-            csrrc s1 x0 #C81
-            csrrc s0 x0 #C01
-            csrrc t0 x0 #C81
-            bne s1 t0 get_time
+            lui t0 #200'C ; #200'BFF8
+$get_time_retry
+            lw s1 t0 #FFC
+            lw s0 t0 #FF8
+            lw t1 t0 #FFC
+            bne s1 t1 get_time_retry
 
 $loop
             lui t0 #98'9
@@ -40,13 +42,15 @@ $shutdown
             inval
 
 $delay_time
-            csrrc t1 x0 #C81
-            csrrc t0 x0 #C01
-            csrrc t2 x0 #C81
-            bne t1 t2 delay_time
+            lui t3 #200'C
+$delay_time_retry
+            lw t1 t3 #FFC
+            lw t0 t3 #FF8
+            lw t2 t3 #FFC
+            bne t1 t2 delay_time_retry
             bltu a1 t1 delay_time_ret
-            bltu t1 a1 delay_time
-            bltu t0 a0 delay_time
+            bltu t1 a1 delay_time_retry
+            bltu t0 a0 delay_time_retry
 $delay_time_ret
             ret
 

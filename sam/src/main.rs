@@ -140,8 +140,13 @@ fn main() {
     mnemonics.insert(    "or", (InsnType::R,    0x0000_6033));
     mnemonics.insert(   "and", (InsnType::R,    0x0000_7033));
     mnemonics.insert( "fence", (InsnType::F,    0x0000_000F));
+    mnemonics.insert( "ecall", (InsnType::X,    0x0000_0073));
+    mnemonics.insert("ebreak", (InsnType::X,    0x0010_0073));
+    mnemonics.insert( "csrrw", (InsnType::C,    0x0000_1073));
+    mnemonics.insert( "csrrs", (InsnType::C,    0x0000_2073));
     mnemonics.insert( "csrrc", (InsnType::C,    0x0000_3073));
     mnemonics.insert("csrrsi", (InsnType::Ci,   0x0000_6073));
+    mnemonics.insert(  "mret", (InsnType::X,    0x3020_0073));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
