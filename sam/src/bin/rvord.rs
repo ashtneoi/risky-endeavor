@@ -1,11 +1,40 @@
+use core::str::FromStr;
+use sam::{from_hex, parse_reg};
+use std::io::{self, prelude::*};
+
 pub struct Ann {
     aq: bool,
     rl: bool,
 }
 
+impl FromStr for Ann {
+    type Err = String; // TODO?
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "z" => Ann { aq: false, rl: false },
+            "aq" => Ann { aq: true, rl: false },
+            "rl" => Ann { aq: false, rl: true },
+            "aqrl" => Ann { aq: true, rl: true },
+            _ => return Err("invalid ordering annotation".to_string()),
+        })
+    }
+}
+
 pub struct OrdSet {
     r: bool,
     w: bool,
+}
+
+impl FromStr for OrdSet {
+    type Err = String; // TODO?
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "r" => OrdSet { r: true, w: false },
+            "w" => OrdSet { r: false, w: true },
+            "rw" => OrdSet { r: true, w: true },
+            _ => return Err("invalid ordering set".to_string()),
+        })
+    }
 }
 
 pub enum MemOp {
@@ -21,10 +50,12 @@ pub enum MemOp {
 impl FromStr for MemOp {
     type Err = String; // TODO?
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut tokens = s.split_ascii_whitespace();
-        let kind = tokens.next().ok_or_else(Err("missing kind".to_string()))?;
+        let tokens: Vec<_> = s.split_ascii_whitespace().collect();
+        if tokens.len() < 1 {
+            return Err("missing kind".to_string());
+        }
 
-        let arg_count = match kind {
+        let arg_count = match tokens[0] {
             "load" => 3,
             "store" => 2,
             "amo" => 5,
@@ -32,13 +63,51 @@ impl FromStr for MemOp {
             "sc" => 3,
             "calc" => 4,
             "fence" => 2,
+            _ => return Err("invalid kind".to_string()),
         };
-        let args: Vec<_> = tokens.take(arg_count).collect();
-        if args.len() < arg_count {
-            return Err("not enough args".to_string());
+        let args = &tokens[1..];
+        if args.len() != arg_count {
+            return Err(format!("wrong number of args (wanted {})", arg_count));
         }
-        Ok(match kind {
-            "load" => Load { rd: args[0]
+        Ok(match tokens[0] {
+            "load" => MemOp::Load {
+                rd: parse_reg(args[0])?,
+                rx: parse_reg(args[1])?,
+                val: from_hex(args[2], 32)?,
+            },
+            "store" => MemOp::Store {
+                rs: parse_reg(args[0])?,
+                rx: parse_reg(args[1])?,
+            },
+            "amo" => MemOp::Amo {
+                rd: parse_reg(args[0])?,
+                rx: parse_reg(args[1])?,
+                rs: parse_reg(args[2])?,
+                load_val: from_hex(args[3], 32)?,
+                store_val: from_hex(args[4], 32)?,
+            },
+            "lr" => MemOp::Lr {
+                rd: parse_reg(args[0])?,
+                rx: parse_reg(args[1])?,
+                ann: Ann::from_str(args[2])?,
+                val: from_hex(args[3], 32)?,
+            },
+            "sc" => MemOp::Sc {
+                rs: parse_reg(args[0])?,
+                rx: parse_reg(args[1])?,
+                ann: Ann::from_str(args[2])?,
+            },
+            "calc" => MemOp::Calc {
+                rd: parse_reg(args[0])?,
+                rs1: parse_reg(args[1])?,
+                rs2: parse_reg(args[2])?,
+                val: from_hex(args[3], 32)?,
+            },
+            "fence" => MemOp::Fence {
+                pred: OrdSet::from_str(args[0])?,
+                succ: OrdSet::from_str(args[1])?,
+            },
+            _ => unreachable!(),
         })
     }
 }
@@ -94,7 +163,7 @@ impl MemOp {
     }
 }
 
-struct SyntacticDeps {
+pub struct SyntacticDeps {
     addr: Vec<(usize, usize, u32)>, // at, on, reg
     data: Vec<(usize, usize, u32)>, // at, on, reg
 }
@@ -129,10 +198,14 @@ pub fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
 }
 
 fn main() {
-    let x = vec![
-    ];
+    let mut ops: Vec<MemOp> = Vec::new();
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+        let line = line.unwrap();
+        ops.push(line.parse().unwrap());
+    }
 
-    let deps = get_syntactic_deps(&x);
+    let deps = get_syntactic_deps(&ops);
     println!("direct syntactic address deps:");
     for (j, i, d) in deps.addr {
         println!("{} on {}, reg {}", j, i, d);
