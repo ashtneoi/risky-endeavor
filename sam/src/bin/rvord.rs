@@ -164,12 +164,14 @@ impl MemOp {
 }
 
 pub struct SyntacticDeps {
-    addr: Vec<(usize, usize, u32)>, // at, on, reg
-    data: Vec<(usize, usize, u32)>, // at, on, reg
+    direct_addr: Vec<(usize, usize, u32)>, // at, on, reg
+    direct_data: Vec<(usize, usize, u32)>, // at, on, reg
 }
 
 pub fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
-    let mut deps = SyntacticDeps { addr: Vec::new(), data: Vec::new() };
+    let mut deps = SyntacticDeps {
+        direct_addr: Vec::new(), direct_data: Vec::new()
+    };
 
     for j in (0..mem_ops.len()).rev() {
         let j_src_addr = mem_ops[j].src_addr();
@@ -180,12 +182,12 @@ pub fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
                 if let Some(d) = mem_ops[i].dest() {
                     if let Some(sa) = j_src_addr {
                         if d == sa && !dests_found.contains(&d) {
-                            deps.addr.push((j, i, d));
+                            deps.direct_addr.push((j, i, d));
                         }
                     }
 
                     if j_src_data.contains(&d) && !dests_found.contains(&d) {
-                        deps.data.push((j, i, d));
+                        deps.direct_data.push((j, i, d));
                     }
 
                     dests_found.push(d);
@@ -207,11 +209,11 @@ fn main() {
 
     let deps = get_syntactic_deps(&ops);
     println!("direct syntactic address deps:");
-    for (j, i, d) in deps.addr {
-        println!("{} on {}, reg {}", j, i, d);
+    for (j, i, d) in deps.direct_addr {
+        println!("{} on {}, reg {}", j + 1, i + 1, d);
     }
     println!("direct syntactic data deps:");
-    for (j, i, d) in deps.data {
-        println!("{} on {}, reg {}", j, i, d);
+    for (j, i, d) in deps.direct_data {
+        println!("{} on {}, reg {}", j + 1, i + 1, d);
     }
 }
