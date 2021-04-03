@@ -3,8 +3,8 @@ use sam::{from_hex, parse_reg};
 use std::io::{self, prelude::*};
 
 pub struct Ann {
-    aq: bool,
-    rl: bool,
+    pub aq: bool,
+    pub rl: bool,
 }
 
 impl FromStr for Ann {
@@ -21,8 +21,8 @@ impl FromStr for Ann {
 }
 
 pub struct OrdSet {
-    r: bool,
-    w: bool,
+    pub r: bool,
+    pub w: bool,
 }
 
 impl FromStr for OrdSet {
