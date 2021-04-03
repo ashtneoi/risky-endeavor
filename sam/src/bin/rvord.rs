@@ -168,35 +168,38 @@ pub struct SyntacticDeps {
     direct_data: Vec<(usize, usize, u32)>, // at, on, reg
 }
 
-pub fn get_syntactic_deps(mem_ops: &[MemOp]) -> SyntacticDeps {
-    let mut deps = SyntacticDeps {
-        direct_addr: Vec::new(), direct_data: Vec::new()
-    };
+impl SyntacticDeps {
+    pub fn from_program(prog: &[MemOp]) -> Self {
+        let mut deps = Self {
+            direct_addr: Vec::new(), direct_data: Vec::new()
+        };
 
-    for j in (0..mem_ops.len()).rev() {
-        let j_src_addr = mem_ops[j].src_addr();
-        let j_src_data = mem_ops[j].src_data();
-        if j_src_addr.is_some() || !j_src_data.is_empty() {
-            let mut dests_found = Vec::new();
-            for i in (0..j).rev() {
-                if let Some(d) = mem_ops[i].dest() {
-                    if let Some(sa) = j_src_addr {
-                        if d == sa && !dests_found.contains(&d) {
-                            deps.direct_addr.push((j, i, d));
+        for j in (0..prog.len()).rev() {
+            let j_src_addr = prog[j].src_addr();
+            let j_src_data = prog[j].src_data();
+            if j_src_addr.is_some() || !j_src_data.is_empty() {
+                let mut dests_found = Vec::new();
+                for i in (0..j).rev() {
+                    if let Some(d) = prog[i].dest() {
+                        if let Some(sa) = j_src_addr {
+                            if d == sa && !dests_found.contains(&d) {
+                                deps.direct_addr.push((j, i, d));
+                            }
                         }
-                    }
 
-                    if j_src_data.contains(&d) && !dests_found.contains(&d) {
-                        deps.direct_data.push((j, i, d));
-                    }
+                        if j_src_data.contains(&d)
+                                && !dests_found.contains(&d) {
+                            deps.direct_data.push((j, i, d));
+                        }
 
-                    dests_found.push(d);
+                        dests_found.push(d);
+                    }
                 }
             }
         }
-    }
 
-    deps
+        deps
+    }
 }
 
 fn main() {
@@ -207,7 +210,7 @@ fn main() {
         ops.push(line.parse().unwrap());
     }
 
-    let deps = get_syntactic_deps(&ops);
+    let deps = SyntacticDeps::from_program(&ops);
     println!("direct syntactic address deps:");
     for (j, i, d) in deps.direct_addr {
         println!("{} on {}, reg {}", j + 1, i + 1, d);
