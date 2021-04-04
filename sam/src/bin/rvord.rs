@@ -1,7 +1,9 @@
+use core::fmt;
 use core::str::FromStr;
 use sam::{from_hex, parse_reg};
 use std::io::{self, prelude::*};
 
+#[derive(Clone, Copy)]
 pub struct Ann {
     pub aq: bool,
     pub rl: bool,
@@ -20,6 +22,7 @@ impl FromStr for Ann {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct OrdSet {
     pub r: bool,
     pub w: bool,
@@ -37,17 +40,18 @@ impl FromStr for OrdSet {
     }
 }
 
-pub enum MemOp {
+// Load values are assertions. Store and calc values are simply true.
+pub enum Insn {
     Load { rd: u32, rx: u32, val: u32 },
     Store { rs: u32, rx: u32 },
-    Amo { rd: u32, rx: u32, rs: u32, load_val: u32, store_val: u32 },
+    Amo { rd: u32, rx: u32, rs: u32, ann: Ann, load_val: u32, store_val: u32 },
     Lr { rd: u32, rx: u32, ann: Ann, val: u32 },
-    Sc { rs: u32, rx: u32, ann: Ann },
+    Sc { rs: u32, rx: u32, ann: Ann }, // with our SC success constraint
     Calc { rd: u32, rs1: u32, rs2: u32, val: u32 },
     Fence { pred: OrdSet, succ: OrdSet },
 }
 
-impl FromStr for MemOp {
+impl FromStr for Insn {
     type Err = String; // TODO?
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let tokens: Vec<_> = s.split_ascii_whitespace().collect();
@@ -58,7 +62,7 @@ impl FromStr for MemOp {
         let arg_count = match tokens[0] {
             "load" => 3,
             "store" => 2,
-            "amo" => 5,
+            "amo" => 6,
             "lr" => 4,
             "sc" => 3,
             "calc" => 4,
@@ -70,40 +74,41 @@ impl FromStr for MemOp {
             return Err(format!("wrong number of args (wanted {})", arg_count));
         }
         Ok(match tokens[0] {
-            "load" => MemOp::Load {
+            "load" => Insn::Load {
                 rd: parse_reg(args[0])?,
                 rx: parse_reg(args[1])?,
                 val: from_hex(args[2], 32)?,
             },
-            "store" => MemOp::Store {
+            "store" => Insn::Store {
                 rs: parse_reg(args[0])?,
                 rx: parse_reg(args[1])?,
             },
-            "amo" => MemOp::Amo {
+            "amo" => Insn::Amo {
                 rd: parse_reg(args[0])?,
                 rx: parse_reg(args[1])?,
                 rs: parse_reg(args[2])?,
-                load_val: from_hex(args[3], 32)?,
-                store_val: from_hex(args[4], 32)?,
+                ann: Ann::from_str(args[3])?,
+                load_val: from_hex(args[4], 32)?,
+                store_val: from_hex(args[5], 32)?,
             },
-            "lr" => MemOp::Lr {
+            "lr" => Insn::Lr {
                 rd: parse_reg(args[0])?,
                 rx: parse_reg(args[1])?,
                 ann: Ann::from_str(args[2])?,
                 val: from_hex(args[3], 32)?,
             },
-            "sc" => MemOp::Sc {
+            "sc" => Insn::Sc {
                 rs: parse_reg(args[0])?,
                 rx: parse_reg(args[1])?,
                 ann: Ann::from_str(args[2])?,
             },
-            "calc" => MemOp::Calc {
+            "calc" => Insn::Calc {
                 rd: parse_reg(args[0])?,
                 rs1: parse_reg(args[1])?,
                 rs2: parse_reg(args[2])?,
                 val: from_hex(args[3], 32)?,
             },
-            "fence" => MemOp::Fence {
+            "fence" => Insn::Fence {
                 pred: OrdSet::from_str(args[0])?,
                 succ: OrdSet::from_str(args[1])?,
             },
@@ -112,9 +117,39 @@ impl FromStr for MemOp {
     }
 }
 
-impl MemOp {
+impl Insn {
+    pub fn is_load(&self) -> bool {
+        use Insn::*;
+        match *self {
+            Load { .. } => true,
+            Amo { .. } => true,
+            Lr { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_store(&self) -> bool {
+        use Insn::*;
+        match *self {
+            Store { .. } => true,
+            Amo { .. } => true,
+            Sc { .. } => true,
+            _ => false,
+        }
+    }
+
+    pub fn annotation(&self) -> Option<Ann> {
+        use Insn::*;
+        match *self {
+            Amo { ann, .. }
+            | Lr { ann, .. }
+            | Sc { ann, .. } => Some(ann),
+            _ => None,
+        }
+    }
+
     pub fn src_addr(&self) -> Option<u32> {
-        use MemOp::*;
+        use Insn::*;
         match *self {
             Load { rx, .. } | Store { rx, .. } if rx != 0 => Some(rx),
             Amo { rx, .. } if rx != 0 => Some(rx),
@@ -124,7 +159,7 @@ impl MemOp {
     }
 
     pub fn src_data(&self) -> Vec<u32> {
-        use MemOp::*;
+        use Insn::*;
         match *self {
             Store { rs, .. } if rs != 0 => vec![rs],
             Amo { rs, .. } if rs != 0 => vec![rs],
@@ -144,7 +179,7 @@ impl MemOp {
     }
 
     pub fn dest(&self) -> Option<u32> {
-        use MemOp::*;
+        use Insn::*;
         match *self {
             Load { rd, .. } if rd != 0 => Some(rd),
             Amo { rd, .. } if rd != 0 => Some(rd),
@@ -155,7 +190,7 @@ impl MemOp {
     }
 
     pub fn carries_dep(&self) -> bool {
-        use MemOp::*;
+        use Insn::*;
         match *self {
             Calc { .. } => true,
             _ => false,
@@ -163,16 +198,29 @@ impl MemOp {
     }
 }
 
+#[derive(Clone, Copy)]
+pub enum SynDepKind {
+    Addr,
+    Data,
+}
+
+impl fmt::Display for SynDepKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            SynDepKind::Addr => write!(f, "address"),
+            SynDepKind::Data => write!(f, "data"),
+        }
+    }
+}
+
 pub struct SyntacticDeps {
-    direct_addr: Vec<(usize, usize, u32)>, // at, on, reg
-    direct_data: Vec<(usize, usize, u32)>, // at, on, reg
+    direct: Vec<(usize, usize, u32, SynDepKind)>, // at, on, reg, kind
+    indirect: Vec<(usize, usize, u32, SynDepKind)>, // at, on, `at` reg, kind
 }
 
 impl SyntacticDeps {
-    pub fn from_program(prog: &[MemOp]) -> Self {
-        let mut deps = Self {
-            direct_addr: Vec::new(), direct_data: Vec::new()
-        };
+    pub fn from_program(prog: &[Insn]) -> Self {
+        let mut deps = Self { direct: Vec::new(), indirect: Vec::new() };
 
         for j in (0..prog.len()).rev() {
             let j_src_addr = prog[j].src_addr();
@@ -180,43 +228,210 @@ impl SyntacticDeps {
             if j_src_addr.is_some() || !j_src_data.is_empty() {
                 let mut dests_found = Vec::new();
                 for i in (0..j).rev() {
-                    if let Some(d) = prog[i].dest() {
-                        if let Some(sa) = j_src_addr {
-                            if d == sa && !dests_found.contains(&d) {
-                                deps.direct_addr.push((j, i, d));
+                    if let Some(s) = prog[i].dest() {
+                        if let Some(r) = j_src_addr {
+                            if r == s && !dests_found.contains(&r) {
+                                deps.direct.push((j, i, r, SynDepKind::Addr));
                             }
                         }
 
-                        if j_src_data.contains(&d)
-                                && !dests_found.contains(&d) {
-                            deps.direct_data.push((j, i, d));
+                        if j_src_data.contains(&s)
+                                && !dests_found.contains(&s) {
+                            deps.direct.push((j, i, s, SynDepKind::Data));
                         }
 
-                        dests_found.push(d);
+                        dests_found.push(s);
                     }
+                }
+            }
+        }
+
+        for (x, &(j, m, r, kind)) in deps.direct.iter().enumerate() {
+            let mut m = m;
+            for &(m2, i, q, _) in &deps.direct[x+1..] {
+                if m == m2 && prog[m2].carries_dep() {
+                    deps.indirect.push((j, i, r, kind));
+                    m = i;
                 }
             }
         }
 
         deps
     }
+
+    pub fn register_value(&self, prog: &[Insn], reg: u32, at: usize) -> u32 {
+        for &(j, i, d, _) in &self.direct {
+            if j == at && d == reg {
+                return match prog[i] {
+                    Insn::Load { rd, val, .. } if rd == reg => val,
+                    Insn::Amo { rd, load_val, .. } if rd == reg => load_val,
+                    Insn::Lr { rd, val, .. } if rd == reg => val,
+                    Insn::Calc { rd, val, .. } if rd == reg => val,
+                    _ => unreachable!(),
+                };
+            }
+        }
+        panic!("register {} is uninitialized", reg);
+    }
+}
+
+type PreservedProgramOrder = Vec<(usize, usize)>; // (before, after)
+
+type GlobalMemoryOrder = Vec<(usize, usize)>; // (hart, program index)
+
+pub fn compute_ppo(
+    hart_id: u32,
+    prog: &[Insn],
+    syn_deps: &SyntacticDeps,
+    gmo: &GlobalMemoryOrder,
+) -> PreservedProgramOrder {
+    // Implementation note: We can't assume our load value assertions here,
+    // because they're assertions, not PPO constraints.
+
+    use Insn::*;
+
+    let mut ppo = PreservedProgramOrder::new();
+    for a in 0..prog.len() {
+        if let &Calc { .. } | Fence { .. } = &prog[a] {
+            continue;
+        }
+        for b in a+1..prog.len() {
+            if let &Calc { .. } | &Fence { .. } = &prog[b] {
+                continue;
+            }
+
+            // 1.
+            if prog[b].is_store() {
+                let brx = prog[b].src_addr().unwrap();
+                if let Some(arx) = prog[a].src_addr() {
+                    let a_addr = syn_deps.register_value(prog, arx, a);
+                    let b_addr = syn_deps.register_value(prog, brx, b);
+                    if a_addr == b_addr {
+                        ppo.push((a, b));
+                    }
+                }
+            }
+
+            // 2.
+            if prog[a].is_load() && prog[b].is_load() {
+                let arx = prog[a].src_addr().unwrap();
+                let brx = prog[b].src_addr().unwrap();
+                let a_addr = syn_deps.register_value(prog, arx, a);
+                let b_addr = syn_deps.register_value(prog, brx, b);
+                if a_addr == b_addr {
+                    let mut no_store_between = true;
+                    for m in a+1..b {
+                        if prog[m].is_store() {
+                            let mrx = prog[m].src_addr().unwrap();
+                            let m_addr = syn_deps.register_value(prog, mrx, m);
+                            if m_addr == a_addr {
+                                no_store_between = false;
+                                break;
+                            }
+                        }
+                    }
+                    if no_store_between {
+                        // TODO: we need the load value axiom
+                        todo!();
+                    }
+                }
+            }
+
+            // 3.
+            if let &Amo { .. } | &Sc { .. } = &prog[a] {
+                if prog[b].is_load() {
+                    // TODO: we need the load value axiom
+                    todo!();
+                }
+            }
+
+            // 4.
+            for m in a+1..b {
+                if let &Fence { pred, succ } = &prog[m] {
+                    let a_pred =
+                        (pred.r && prog[a].is_load())
+                        || (pred.w && prog[a].is_store());
+                    let b_succ =
+                        (succ.r && prog[b].is_load())
+                        || (succ.w && prog[b].is_store());
+                    if a_pred && b_succ {
+                        ppo.push((a, b));
+                        break;
+                    }
+                }
+            }
+
+            // 5.
+            if let Some(ann) = prog[a].annotation() {
+                if ann.aq {
+                    ppo.push((a, b));
+                }
+            }
+
+            // 6.
+            if let Some(ann) = prog[b].annotation() {
+                if ann.rl {
+                    ppo.push((a, b));
+                }
+            }
+
+            // 7.
+            if let (Some(a_ann), Some(b_ann)) =
+                    (prog[a].annotation(), prog[b].annotation()) {
+                if (a_ann.aq || a_ann.rl) && (b_ann.aq || b_ann.rl) {
+                    ppo.push((a, b));
+                }
+            }
+
+            // 8.
+            if let (&Lr { .. }, &Sc { .. }) = (&prog[a], &prog[b]) {
+                // TODO: Panic if the GMO violates our SC success constraint.
+                // TODO: Do the rest of 8.
+                todo!();
+            }
+
+            // 9. and 10.
+        }
+    }
+
+    ppo
 }
 
 fn main() {
-    let mut ops: Vec<MemOp> = Vec::new();
+    let mut progs: Vec<Vec<Insn>> = vec![vec![]];
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
-        let line = line.unwrap();
-        ops.push(line.parse().unwrap());
+        let line_untrimmed = line.unwrap();
+        let line = line_untrimmed.trim();
+        match line {
+            "" => (),
+            "-" => progs.push(vec![]),
+            _ => progs.last_mut().unwrap().push(line.parse().unwrap()),
+        }
     }
 
-    let deps = SyntacticDeps::from_program(&ops);
-    println!("direct syntactic address deps:");
-    for (j, i, d) in deps.direct_addr {
-        println!("{} on {}, reg {}", j + 1, i + 1, d);
+    let deps = SyntacticDeps::from_program(&progs[0]);
+    println!("direct syntactic deps:");
+    for &(j, i, d, k) in &deps.direct {
+        println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
     }
-    println!("direct syntactic data deps:");
-    for (j, i, d) in deps.direct_data {
-        println!("{} on {}, reg {}", j + 1, i + 1, d);
+    println!("indirect syntactic deps:");
+    for &(j, i, d, k) in &deps.indirect {
+        println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
     }
+
+    let mut gmo = GlobalMemoryOrder::new();
+    for (hart_id, prog) in progs.iter().enumerate() {
+        for i in 0..prog.len() {
+            gmo.push((hart_id, i));
+        }
+    }
+
+    println!();
+    println!("{:?}", compute_ppo(
+        0,
+        &progs[0],
+        &deps,
+        &gmo,
+    ));
 }
