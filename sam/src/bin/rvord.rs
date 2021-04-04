@@ -198,7 +198,7 @@ impl Insn {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum SynDepKind {
     Addr,
     Data,
@@ -248,7 +248,7 @@ impl SyntacticDeps {
 
         for (x, &(j, m, r, kind)) in deps.direct.iter().enumerate() {
             let mut m = m;
-            for &(m2, i, q, _) in &deps.direct[x+1..] {
+            for &(m2, i, _, _) in &deps.direct[x+1..] {
                 if m == m2 && prog[m2].carries_dep() {
                     deps.indirect.push((j, i, r, kind));
                     m = i;
@@ -275,16 +275,17 @@ impl SyntacticDeps {
     }
 }
 
-type PreservedProgramOrder = Vec<(usize, usize)>; // (before, after)
+type PreservedProgramOrder = Vec<(usize, usize, u32)>; // (before, after, rule)
 
 type GlobalMemoryOrder = Vec<(usize, usize)>; // (hart, program index)
 
+/// None means the GMO violated one of our simplifying contraints.
 pub fn compute_ppo(
-    hart_id: u32,
+    _hart_id: usize,
     prog: &[Insn],
     syn_deps: &SyntacticDeps,
-    gmo: &GlobalMemoryOrder,
-) -> PreservedProgramOrder {
+    _gmo: &GlobalMemoryOrder,
+) -> Option<PreservedProgramOrder> {
     // Implementation note: We can't assume our load value assertions here,
     // because they're assertions, not PPO constraints.
 
@@ -307,7 +308,7 @@ pub fn compute_ppo(
                     let a_addr = syn_deps.register_value(prog, arx, a);
                     let b_addr = syn_deps.register_value(prog, brx, b);
                     if a_addr == b_addr {
-                        ppo.push((a, b));
+                        ppo.push((a, b, 1));
                     }
                 }
             }
@@ -355,7 +356,7 @@ pub fn compute_ppo(
                         (succ.r && prog[b].is_load())
                         || (succ.w && prog[b].is_store());
                     if a_pred && b_succ {
-                        ppo.push((a, b));
+                        ppo.push((a, b, 4));
                         break;
                     }
                 }
@@ -364,14 +365,14 @@ pub fn compute_ppo(
             // 5.
             if let Some(ann) = prog[a].annotation() {
                 if ann.aq {
-                    ppo.push((a, b));
+                    ppo.push((a, b, 5));
                 }
             }
 
             // 6.
             if let Some(ann) = prog[b].annotation() {
                 if ann.rl {
-                    ppo.push((a, b));
+                    ppo.push((a, b, 6));
                 }
             }
 
@@ -379,22 +380,49 @@ pub fn compute_ppo(
             if let (Some(a_ann), Some(b_ann)) =
                     (prog[a].annotation(), prog[b].annotation()) {
                 if (a_ann.aq || a_ann.rl) && (b_ann.aq || b_ann.rl) {
-                    ppo.push((a, b));
+                    ppo.push((a, b, 7));
                 }
             }
 
             // 8.
             if let (&Lr { .. }, &Sc { .. }) = (&prog[a], &prog[b]) {
-                // TODO: Panic if the GMO violates our SC success constraint.
+                // TODO: Return None if the GMO violates our SC success
+                // constraint.
                 // TODO: Do the rest of 8.
                 todo!();
             }
 
             // 9. and 10.
+            for &(j, i, _, k) in
+                    syn_deps.direct.iter().chain(&syn_deps.indirect) {
+                if a == i && b == j {
+                    match k {
+                        SynDepKind::Addr => ppo.push((a, b, 9)),
+                        SynDepKind::Data => ppo.push((a, b, 10)),
+                    }
+                }
+            }
+
+            // 11. is never true since we don't have control instructions.
+
+            // 12.
+            // TODO
+
+            // 13.
+            if prog[b].is_store() {
+                for m in a+1..b {
+                    for &(j, i, _, k) in
+                            syn_deps.direct.iter().chain(&syn_deps.indirect) {
+                        if a == i && m == j && k == SynDepKind::Addr {
+                            ppo.push((a, b, 13));
+                        }
+                    }
+                }
+            }
         }
     }
 
-    ppo
+    Some(ppo)
 }
 
 fn main() {
@@ -410,16 +438,6 @@ fn main() {
         }
     }
 
-    let deps = SyntacticDeps::from_program(&progs[0]);
-    println!("direct syntactic deps:");
-    for &(j, i, d, k) in &deps.direct {
-        println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
-    }
-    println!("indirect syntactic deps:");
-    for &(j, i, d, k) in &deps.indirect {
-        println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
-    }
-
     let mut gmo = GlobalMemoryOrder::new();
     for (hart_id, prog) in progs.iter().enumerate() {
         for i in 0..prog.len() {
@@ -427,11 +445,28 @@ fn main() {
         }
     }
 
-    println!();
-    println!("{:?}", compute_ppo(
-        0,
-        &progs[0],
-        &deps,
-        &gmo,
-    ));
+    for (hart_id, prog) in progs.iter().enumerate() {
+        let deps = SyntacticDeps::from_program(prog);
+
+        println!("direct syntactic deps:");
+        for &(j, i, d, k) in &deps.direct {
+            println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
+        }
+        println!();
+
+        println!("indirect syntactic deps:");
+        for &(j, i, d, k) in &deps.indirect {
+            println!("{} on {}, reg {}, kind {}", j + 1, i + 1, d, k);
+        }
+        println!();
+
+        // TODO: Somebody has to check the load value assertions.
+
+        println!("preserved program order:");
+        let ppo = compute_ppo(hart_id, prog, &deps, &gmo).unwrap();
+        for (a, b, rule) in ppo {
+            println!("{} before {} (rule {})", a + 1, b + 1, rule);
+        }
+        println!();
+    }
 }
