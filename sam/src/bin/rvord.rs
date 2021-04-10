@@ -1,6 +1,7 @@
 use core::fmt;
 use core::str::FromStr;
 use sam::{from_hex, parse_reg};
+use std::collections::HashMap;
 use std::io::{self, prelude::*};
 
 #[derive(Clone, Copy)]
@@ -279,6 +280,56 @@ type PreservedProgramOrder = Vec<(usize, usize, u32)>; // (before, after, rule)
 
 type GlobalMemoryOrder = Vec<(usize, usize)>; // (hart, program index)
 
+pub struct RegMod {
+    reg: u32,
+    load_addr: Option<u32>,
+    val: u32,
+}
+
+pub fn load_value_axiom( // name sucks
+    progs: &[&[Insn]],
+    gmo: &GlobalMemoryOrder,
+    gmo_idx: usize,
+) -> u32 {
+    use Insn::*;
+
+    let (hart_id, prog_idx) = gmo[gmo_idx];
+    let insn = &progs[hart_id][prog_idx];
+    for g in (gmo_idx+1..gmo.len()).rev() {
+        let (h, p) = gmo[g];
+        if p < prog_idx {
+            let i = &progs[h][p];
+            if i.is_store() {
+                let src_addr = i.src_addr();
+                // figure out value of src_addr?
+
+                // ???
+            }
+        }
+    }
+}
+
+pub fn check_load_value_assertions(
+    progs: &[&[Insn]],
+    gmo: &GlobalMemoryOrder,
+) -> Result<(), String> {
+    use Insn::*;
+
+    let mut reg_mods: Vec<Vec<RegMod>> = Vec::new();
+
+    for (gmo_idx, (hart_id, prog_idx)) in gmo.iter().enumerate() {
+        match progs[hart_id][prog_idx] {
+            Load { rd, rx, val } => {
+                // Use the load value axiom.
+                todo!()
+            },
+            _ => todo!(),
+        }
+    }
+
+    todo!()
+}
+
 /// None means the GMO violated one of our simplifying contraints.
 pub fn compute_ppo(
     _hart_id: usize,
@@ -305,6 +356,9 @@ pub fn compute_ppo(
             if prog[b].is_store() {
                 let brx = prog[b].src_addr().unwrap();
                 if let Some(arx) = prog[a].src_addr() {
+                    // FIXME: register_value() uses load value assertions!!!
+                    // can't do that
+                    panic!("FIXME");
                     let a_addr = syn_deps.register_value(prog, arx, a);
                     let b_addr = syn_deps.register_value(prog, brx, b);
                     if a_addr == b_addr {
@@ -317,6 +371,9 @@ pub fn compute_ppo(
             if prog[a].is_load() && prog[b].is_load() {
                 let arx = prog[a].src_addr().unwrap();
                 let brx = prog[b].src_addr().unwrap();
+                // FIXME: register_value() uses load value assertions!!! can't
+                // do that
+                panic!("FIXME");
                 let a_addr = syn_deps.register_value(prog, arx, a);
                 let b_addr = syn_deps.register_value(prog, brx, b);
                 if a_addr == b_addr {
@@ -324,6 +381,9 @@ pub fn compute_ppo(
                     for m in a+1..b {
                         if prog[m].is_store() {
                             let mrx = prog[m].src_addr().unwrap();
+                            // FIXME: register_value() uses load value
+                            // assertions!!! can't do that
+                            panic!("FIXME");
                             let m_addr = syn_deps.register_value(prog, mrx, m);
                             if m_addr == a_addr {
                                 no_store_between = false;
