@@ -75,6 +75,7 @@ fn main() {
     mnemonics.insert( "csrrc", (InsnType::C,    0x0000_3073));
     mnemonics.insert("csrrsi", (InsnType::Ci,   0x0000_6073));
     mnemonics.insert(  "mret", (InsnType::X,    0x3020_0073));
+    mnemonics.insert(   "wfi", (InsnType::X,    0x1050_0073));
     let mnemonics = mnemonics;
 
     let mut addr: u32 = 0x8000_0000;
