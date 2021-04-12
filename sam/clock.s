@@ -9,6 +9,7 @@ $get_time_retry
             bne s1 t1 get_time_retry
 
 $loop
+            ; {s1,s0} += #98'9680
             lui t0 #98'9
             addi t0 t0 #680
             add t1 s0 t0
@@ -141,7 +142,7 @@ $write
 
 
 $whatever
-            csrrc a0 x0 #C01
+            csrrc a0 x0 #C01 ; time
             jal ra write_hex_u32
             addi a0 x0 #0D
             jal ra write

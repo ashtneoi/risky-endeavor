@@ -6,7 +6,7 @@ use std::io::{self, prelude::*};
 
 #[derive(Clone, Copy)]
 enum InsnType {
-    X,  // inherent
+    X, // inherent
     R,
     I,
     S,
