@@ -51,6 +51,12 @@ $bad_mtvec
             jal x0 shutdown
 
 $main
+            addi a0 x0 #9
+            lui a1 hi_there
+            addi a1 a1 hi_there
+            jal ra write_str
+            jal ra crlf
+
             jal ra get_mtime
             jal ra add_1sec
             jal ra set_mtimecmp
@@ -65,10 +71,19 @@ $main
             csrrs x0 t0 #300 ; mstatus
             ; TODO: check that MIE was set?
 
+            addi t0 x0 #3
+$loop
             wfi
-            jal x0 -#4
+            addi t0 t0 -#1
+            bne t0 x0 loop
+
+            jal x0 shutdown
 
             inval
+
+;;;
+$hi_there
+.utf8 hi there!
 
 ;;;
 $add_1sec
@@ -275,7 +290,8 @@ $shutdown
             lui t0 #5 ; #5555
             addi t0 t0 #555
             sw t0 t1 #0
-            jal x0 #0
+            wfi
+            jal x0 -#4
 
 ;;;
 $write_hex_u64
@@ -377,4 +393,31 @@ $write
             and t2 t2 t1
             beq t2 x0 -#8
             sb a0 t0 #0
+            ret
+
+;;;
+$write_str
+            addi sp sp #10
+            sw ra sp -#4
+            sw s0 sp -#8
+            sw s1 sp -#C
+            sw s2 sp -#10
+
+            addi s0 a0 #0 ; len
+            addi s1 a1 #0 ; string
+            add s2 a1 a0 ; string end
+            auipc ra #0
+            addi ra ra #8
+$write_str_loop
+            beq s1 s2 write_str_done
+            lb a0 s1 #0
+            addi s1 s1 #1
+            jal x0 write
+
+$write_str_done
+            lw ra sp -#4
+            lw s0 sp -#8
+            lw s1 sp -#C
+            lw s2 sp -#10
+            addi sp sp -#C
             ret
