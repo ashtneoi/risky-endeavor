@@ -93,6 +93,9 @@ fn main() {
     // Get an early error if the input file isn't seekable.
     input.seek(io::SeekFrom::Start(0)).unwrap();
 
+    let mut pending_labels = Vec::new();
+    let mut labels_in_order = Vec::new();
+
     for line_full in io::BufReader::new(&input).lines() {
         let line_full = line_full.unwrap();
         let line_trimmed = line_full.trim_start();
@@ -106,17 +109,39 @@ fn main() {
             if labels.contains_key(&label) {
                 panic!("duplicate label '{}'", &label);
             }
-            labels.insert(label, addr);
+            pending_labels.push(label.clone());
+            if output.is_none() {
+                labels_in_order.push(label);
+            }
         } else if line.starts_with(".utf8 ") {
             // UTF-8 string
+            for label in pending_labels.drain(..) {
+                labels.insert(label, addr);
+            }
             let len = (line.len() - ".utf8 ".len()) as u32;
-            addr += (len + 3) & !3;
+            addr += len;
         } else if line.is_empty() {
             // nothing
         } else {
             // instruction
+            addr = (addr + 3) & !3;
+            for label in pending_labels.drain(..) {
+                labels.insert(label, addr);
+            }
             addr += 4;
         }
+    }
+    for label in pending_labels.drain(..) {
+        labels.insert(label, addr);
+    }
+
+    if output.is_none() {
+        for label in &labels_in_order {
+            let addr = labels[label];
+            println!(
+                "{:04X}'{:04X}: {}", addr >> 16, addr & 0xFFFF, &label);
+        }
+        println!();
     }
 
     addr = 0x8000_0000;
@@ -231,8 +256,9 @@ fn main() {
                     } else {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
-                        label_addr.wrapping_sub(addr)
+                        let displacement = label_addr.wrapping_sub(addr);
                         // FIXME: detect out-of-range labels
+                        displacement
                     };
                     insns[0] += (rs1 << 15) + (rs2 << 20);
                     insns[0] += imm << (31-12) >> (31-12+12) << 31;
@@ -264,8 +290,9 @@ fn main() {
                     } else {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
-                        label_addr.wrapping_sub(addr)
+                        let displacement = label_addr.wrapping_sub(addr);
                         // FIXME: detect out-of-range labels
+                        displacement
                     };
                     insns[0] += rd << 7;
                     insns[0] += imm << (31-20) >> (31-20+20) << 31;
