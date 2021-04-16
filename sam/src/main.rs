@@ -119,7 +119,7 @@ fn main() {
         }
     }
 
-    addr = 0;
+    addr = 0x8000_0000;
     input.seek(io::SeekFrom::Start(0)).unwrap();
 
     for line_full in io::BufReader::new(&input).lines() {
