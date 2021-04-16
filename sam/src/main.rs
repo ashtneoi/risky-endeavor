@@ -107,6 +107,10 @@ fn main() {
                 panic!("duplicate label '{}'", &label);
             }
             labels.insert(label, addr);
+        } else if line.starts_with(".utf8 ") {
+            // UTF-8 string
+            let len = (line.len() - ".utf8 ".len()) as u32;
+            addr += (len + 3) & !3;
         } else if line.is_empty() {
             // nothing
         } else {
@@ -127,15 +131,45 @@ fn main() {
         };
         if line.starts_with('$') {
             // label
+        } else if line.starts_with(".utf8 ") {
+            // UTF-8 string
+            let s = &line[".utf8 ".len()..];
+            if let Some(ref mut output) = output {
+                output.write_all(s.as_bytes()).unwrap();
+            } else {
+                println!(
+                    "{:04X}'{:04X}: \"{}\"",
+                    addr >> 16,
+                    addr & 0xFFFF,
+                    s,
+                );
+            }
+            addr += s.len() as u32;
         } else if line.is_empty() {
             // nothing
         } else {
             // instruction
+            if addr & 3 != 0 {
+                let pad = 4 - (addr & 3);
+                if let Some(ref mut output) = output {
+                    for _ in 0..pad {
+                        output.write_all(&[0u8]).unwrap();
+                    }
+                } else {
+                    println!(
+                        "{:04X}'{:04X}: pad ({})",
+                        addr >> 16,
+                        addr & 0xFFFF,
+                        pad,
+                    );
+                }
+                addr += pad;
+            }
             let mut parts = line.split_ascii_whitespace();
             let mnemonic = parts.next().expect("missing mnemonic");
             let (insn_type, template) = *mnemonics.get(&mnemonic)
                 .unwrap_or_else(|| panic!("unknown mnemonic '{}'", &mnemonic));
-            let mut insn = template;
+            let mut insns = vec![template];
             match insn_type {
                 InsnType::X => {
                     // already done
@@ -147,7 +181,7 @@ fn main() {
                     let rs1 = parse_reg(rs1).unwrap();
                     let rs2 = parts.next().expect("missing rs2");
                     let rs2 = parse_reg(rs2).unwrap();
-                    insn += (rd << 7) + (rs1 << 15) + (rs2 << 20);
+                    insns[0] += (rd << 7) + (rs1 << 15) + (rs2 << 20);
                 },
                 InsnType::Sxli => {
                     let rd = parts.next().expect("missing rd");
@@ -156,7 +190,7 @@ fn main() {
                     let rs1 = parse_reg(rs1).unwrap();
                     let imm = parts.next().expect("missing imm5");
                     let imm = from_hex(imm, 5).unwrap();
-                    insn += (rd << 7) + (rs1 << 15) + (imm << 20);
+                    insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
                 },
                 InsnType::I => {
                     let rd = parts.next().expect("missing rd");
@@ -164,8 +198,11 @@ fn main() {
                     let rs1 = parts.next().expect("missing rs1");
                     let rs1 = parse_reg(rs1).unwrap();
                     let imm = parts.next().expect("missing imm12");
-                    let imm = from_hex(imm, 12).unwrap();
-                    insn += (rd << 7) + (rs1 << 15) + (imm << 20);
+                    let imm = match labels.get(imm) {
+                        Some(&x) => x & 0xFFF,
+                        None => from_hex(imm, 12).unwrap(),
+                    };
+                    insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
                 },
                 InsnType::S => {
                     let rs2 = parts.next().expect("missing rs2");
@@ -174,9 +211,9 @@ fn main() {
                     let rs1 = parse_reg(rs1).unwrap();
                     let imm = parts.next().expect("missing imm12");
                     let imm = from_hex(imm, 12).unwrap();
-                    insn += (rs1 << 15) + (rs2 << 20);
-                    insn += imm << (31-11) >> (31-11+5) << 25;
-                    insn += imm << (31-4) >> (31-4+0) << 7;
+                    insns[0] += (rs1 << 15) + (rs2 << 20);
+                    insns[0] += imm << (31-11) >> (31-11+5) << 25;
+                    insns[0] += imm << (31-4) >> (31-4+0) << 7;
                 },
                 InsnType::B => {
                     let rs1 = parts.next().expect("missing rs1");
@@ -197,18 +234,21 @@ fn main() {
                         label_addr.wrapping_sub(addr)
                         // FIXME: detect out-of-range labels
                     };
-                    insn += (rs1 << 15) + (rs2 << 20);
-                    insn += imm << (31-12) >> (31-12+12) << 31;
-                    insn += imm << (31-10) >> (31-10+5) << 25;
-                    insn += imm << (31-4) >> (31-4+1) << 8;
-                    insn += imm << (31-11) >> (31-11+11) << 7;
+                    insns[0] += (rs1 << 15) + (rs2 << 20);
+                    insns[0] += imm << (31-12) >> (31-12+12) << 31;
+                    insns[0] += imm << (31-10) >> (31-10+5) << 25;
+                    insns[0] += imm << (31-4) >> (31-4+1) << 8;
+                    insns[0] += imm << (31-11) >> (31-11+11) << 7;
                 },
                 InsnType::U => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
                     let imm = parts.next().expect("missing imm20");
-                    let imm = from_hex(imm, 20).unwrap();
-                    insn += (rd << 7) + (imm << 12);
+                    let imm = match labels.get(imm) {
+                        Some(&x) => x >> 12,
+                        None => from_hex(imm, 20).unwrap(),
+                    };
+                    insns[0] += (rd << 7) + (imm << 12);
                 },
                 InsnType::J => {
                     let rd = parts.next().expect("missing rd");
@@ -227,18 +267,18 @@ fn main() {
                         label_addr.wrapping_sub(addr)
                         // FIXME: detect out-of-range labels
                     };
-                    insn += rd << 7;
-                    insn += imm << (31-20) >> (31-20+20) << 31;
-                    insn += imm << (31-10) >> (31-10+1) << 21;
-                    insn += imm << (31-11) >> (31-11+11) << 20;
-                    insn += imm << (31-19) >> (31-19+12) << 12;
+                    insns[0] += rd << 7;
+                    insns[0] += imm << (31-20) >> (31-20+20) << 31;
+                    insns[0] += imm << (31-10) >> (31-10+1) << 21;
+                    insns[0] += imm << (31-11) >> (31-11+11) << 20;
+                    insns[0] += imm << (31-19) >> (31-19+12) << 12;
                 },
                 InsnType::F => {
                     let pred = parts.next().expect("missing pred");
                     let pred = parse_pred_succ(pred).unwrap();
                     let succ = parts.next().expect("missing succ");
                     let succ = parse_pred_succ(succ).unwrap();
-                    insn += (pred << 24) + (succ << 20);
+                    insns[0] += (pred << 24) + (succ << 20);
                 },
                 InsnType::C => {
                     let rd = parts.next().expect("missing rd");
@@ -247,7 +287,7 @@ fn main() {
                     let rs1 = parse_reg(rs1).unwrap();
                     let csr = parts.next().expect("missing csr");
                     let csr = from_hex(csr, 12).unwrap();
-                    insn += (rd << 7) + (rs1 << 15) + (csr << 20);
+                    insns[0] += (rd << 7) + (rs1 << 15) + (csr << 20);
                 },
                 InsnType::Ci => {
                     let rd = parts.next().expect("missing rd");
@@ -256,22 +296,25 @@ fn main() {
                     let uimm = from_hex(uimm, 5).unwrap();
                     let csr = parts.next().expect("missing csr");
                     let csr = from_hex(csr, 12).unwrap();
-                    insn += (rd << 7) + (uimm << 15) + (csr << 20);
+                    insns[0] += (rd << 7) + (uimm << 15) + (csr << 20);
                 },
             }
             assert_eq!(parts.next(), None, "trailing operands");
-            if let Some(ref mut output) = output {
-                output.write_all(&insn.to_le_bytes()).unwrap();
-            } else {
-                println!(
-                    "{:04X}'{:04X}: {:04X}'{:04X}",
-                    addr >> 16,
-                    addr & 0xFFFF,
-                    insn >> 16,
-                    insn & 0xFFFF,
-                );
+            for insn in insns {
+                if let Some(ref mut output) = output {
+                    output.write_all(&insn.to_le_bytes()).unwrap();
+                } else {
+                    println!(
+                        "{:04X}'{:04X}: {:04X}'{:04X}  {}",
+                        addr >> 16,
+                        addr & 0xFFFF,
+                        insn >> 16,
+                        insn & 0xFFFF,
+                        line_trimmed,
+                    );
+                }
+                addr += 4;
             }
-            addr += 4;
         }
     }
 
