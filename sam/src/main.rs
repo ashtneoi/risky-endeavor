@@ -38,8 +38,6 @@ fn parse_pred_succ(s: &str) -> Result<u32, String> {
 }
 
 fn main() {
-    let mut labels = HashMap::new();
-
     let mut mnemonics = HashMap::new();
     mnemonics.insert( "inval", (InsnType::X,    0x0000_0000));
     mnemonics.insert(   "lui", (InsnType::U,    0x0000_0037));
@@ -78,6 +76,9 @@ fn main() {
     mnemonics.insert(   "wfi", (InsnType::X,    0x1050_0073));
     let mnemonics = mnemonics;
 
+    let mut labels = HashMap::new();
+    let mut string_lens = HashMap::new();
+
     let mut addr: u32 = 0x8000_0000;
 
     let args: Vec<_> = env::args_os().collect();
@@ -115,10 +116,11 @@ fn main() {
             }
         } else if line.starts_with(".utf8 ") {
             // UTF-8 string
-            for label in pending_labels.drain(..) {
-                labels.insert(label, addr);
-            }
             let len = (line.len() - ".utf8 ".len()) as u32;
+            for label in pending_labels.drain(..) {
+                labels.insert(label.clone(), addr);
+                string_lens.insert(label, len);
+            }
             addr += len;
         } else if line.is_empty() {
             // nothing
@@ -222,10 +224,18 @@ fn main() {
                     let rd = parse_reg(rd).unwrap();
                     let rs1 = parts.next().expect("missing rs1");
                     let rs1 = parse_reg(rs1).unwrap();
-                    let imm = parts.next().expect("missing imm12");
-                    let imm = match labels.get(imm) {
-                        Some(&x) => x & 0xFFF,
-                        None => from_hex(imm, 12).unwrap(),
+                    let imm_str = parts.next().expect("missing imm12");
+                    let imm = if imm_str.starts_with('%') {
+                        let label = &imm_str["%".len()..];
+                        let len = *string_lens.get(label)
+                            .unwrap_or_else(
+                                || panic!("unknown label '{}'", label))
+                            as u32;
+                        len & 0xFFF
+                    } else if let Some(&x) = labels.get(imm_str) {
+                        x & 0xFFF
+                    } else {
+                        from_hex(imm_str, 12).unwrap()
                     };
                     insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
                 },
@@ -250,7 +260,7 @@ fn main() {
                             || imm_str.starts_with('-') {
                         let imm = from_hex(imm_str, 13).unwrap();
                         if imm & 0x3 != 0 {
-                            panic!("last two bits of imm13 must be 0");
+                            panic!("low two bits of imm13 must be 0");
                         }
                         imm
                     } else {
@@ -269,10 +279,20 @@ fn main() {
                 InsnType::U => {
                     let rd = parts.next().expect("missing rd");
                     let rd = parse_reg(rd).unwrap();
-                    let imm = parts.next().expect("missing imm20");
-                    let imm = match labels.get(imm) {
-                        Some(&x) => x >> 12,
-                        None => from_hex(imm, 20).unwrap(),
+                    let imm_str = parts.next().expect("missing imm20");
+                    let imm = if imm_str.starts_with('%') {
+                        let label = &imm_str["%".len()..];
+                        let len = *string_lens.get(label)
+                            .unwrap_or_else(
+                                || panic!("unknown label '{}'", label))
+                            as u32;
+                        // counteract sign extension of addi immediate
+                        (len >> 12) + ((len >> 11) & 1)
+                    } else if let Some(&x) = labels.get(imm_str) {
+                        // counteract sign extension of addi immediate
+                        (x >> 12) + ((x >> 11) & 1)
+                    } else {
+                        from_hex(imm_str, 20).unwrap()
                     };
                     insns[0] += (rd << 7) + (imm << 12);
                 },
