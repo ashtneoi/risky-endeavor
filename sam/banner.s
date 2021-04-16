@@ -54,40 +54,55 @@ $main
             addi a0 x0 %mvendorid
             lui a1 mvendorid
             addi a1 a1 mvendorid
-            jal ra write_str
-            csrrs a0 x0 #F11 ; mvendorid
-            jal ra write_hex_u32
+            csrrs a2 x0 #F11 ; mvendorid
+            jal ra write_format
             jal ra crlf
 
             addi a0 x0 %marchid
             lui a1 marchid
             addi a1 a1 marchid
-            jal ra write_str
-            csrrs a0 x0 #F12 ; marchid
-            jal ra write_hex_u32
+            csrrs a2 x0 #F12 ; marchid
+            jal ra write_format
             jal ra crlf
 
             addi a0 x0 %mimpid
             lui a1 mimpid
             addi a1 a1 mimpid
-            jal ra write_str
-            csrrs a0 x0 #F13 ; mimpid
-            jal ra write_hex_u32
+            csrrs a2 x0 #F13 ; mimpid
+            jal ra write_format
+            jal ra crlf
+
+            addi a0 x0 %mstatus
+            lui a1 mstatus
+            addi a1 a1 mstatus
+            csrrs a2 x0 #300 ; mstatus
+            jal ra write_format
+            jal ra crlf
+
+            addi a0 x0 %misa
+            lui a1 misa
+            addi a1 a1 misa
+            csrrs a2 x0 #301 ; misa
+            jal ra write_format
             jal ra crlf
 
             jal x0 shutdown
 
 ;;;
 $mvendorid
-.utf8 mvendorid=
+.utf8 mvendorid = %
 
-;;;
 $marchid
-.utf8   marchid=
+.utf8   marchid = %
 
-;;;
 $mimpid
-.utf8    mimpid=
+.utf8    mimpid = %
+
+$mstatus
+.utf8   mstatus = %
+
+$misa
+.utf8      misa = %
 
 ;;;
 $exception
@@ -338,5 +353,52 @@ $write_str_done
             lw s0 sp -#8
             lw s1 sp -#C
             lw s2 sp -#10
-            addi sp sp -#C
+            addi sp sp -#10
+            ret
+
+;;;
+$write_format
+            addi sp sp #30
+            sw ra sp -#4
+            sw s0 sp -#8
+            sw s1 sp -#C
+            sw s2 sp -#10
+            sw s3 sp -#14
+            sw s4 sp -#18
+
+            addi s0 a0 #0 ; len
+            addi s1 a1 #0 ; string
+            add s2 a1 a0 ; string end
+            addi s3 x0 #25 ; %
+
+            addi s4 sp -#1C
+            sw a2 sp -#1C
+            sw a3 sp -#20
+            sw a4 sp -#24
+            sw a5 sp -#28
+            sw a6 sp -#2C
+            sw a7 sp -#30
+
+            auipc ra #0
+            addi ra ra #8
+$write_format_loop
+            beq s1 s2 write_format_done
+            lb a0 s1 #0
+            addi s1 s1 #1
+            beq a0 s3 write_format_placeholder
+            jal x0 write
+
+$write_format_placeholder
+            lw a0 s4 #0
+            addi s4 s4 -#4
+            jal x0 write_hex_u32
+
+$write_format_done
+            lw ra sp -#4
+            lw s0 sp -#8
+            lw s1 sp -#C
+            lw s2 sp -#10
+            lw s3 sp -#14
+            lw s4 sp -#18
+            addi sp sp -#30
             ret

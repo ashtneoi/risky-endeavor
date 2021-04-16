@@ -419,5 +419,5 @@ $write_str_done
             lw s0 sp -#8
             lw s1 sp -#C
             lw s2 sp -#10
-            addi sp sp -#C
+            addi sp sp -#10
             ret
