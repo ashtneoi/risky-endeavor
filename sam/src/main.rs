@@ -37,6 +37,10 @@ fn parse_pred_succ(s: &str) -> Result<u32, String> {
     Ok(n)
 }
 
+fn u32_to_hex(x: u32) -> String {
+    format!("{:04X}'{:04X}", x >> 16, x & 0xFFFF)
+}
+
 fn main() {
     let mut mnemonics = HashMap::new();
     mnemonics.insert( "inval", (InsnType::X,    0x0000_0000));
@@ -267,7 +271,14 @@ fn main() {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
                         let displacement = label_addr.wrapping_sub(addr);
-                        // FIXME: detect out-of-range labels
+                        if (displacement as i32) < -0x1000
+                                || (displacement as i32) > 0xFFF {
+                            panic!(
+                                "displacement {} is too large \
+                                    for 13-bit immediate",
+                                u32_to_hex(displacement),
+                            );
+                        }
                         displacement
                     };
                     insns[0] += (rs1 << 15) + (rs2 << 20);
@@ -311,7 +322,14 @@ fn main() {
                         let label_addr = labels.get(imm_str).unwrap_or_else(
                             || panic!("unknown label '{}'", imm_str));
                         let displacement = label_addr.wrapping_sub(addr);
-                        // FIXME: detect out-of-range labels
+                        if (displacement as i32) < -0x10_0000
+                                || (displacement as i32) > 0xF_FFFF {
+                            panic!(
+                                "displacement {} is too large \
+                                    for 21-bit immediate",
+                                u32_to_hex(displacement),
+                            );
+                        }
                         displacement
                     };
                     insns[0] += rd << 7;
