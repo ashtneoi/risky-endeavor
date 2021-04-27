@@ -84,6 +84,23 @@ $main
             addi a1 a1 misa
             csrrs a2 x0 #301 ; misa
             jal ra write_format
+            addi a0 x0 #20 ; " "
+            jal ra write
+
+$dump_misa
+            csrrs s0 x0 #301 ; misa
+            addi s1 x0 #41 ; A
+$dump_misa_loop
+            andi t0 s0 #1
+            beq x0 t0 dump_misa_continue
+            addi a0 s1 #0
+            jal ra write
+$dump_misa_continue
+            srli s0 s0 #1
+            addi s1 s1 #1
+            addi t0 x0 #5B ; "Z" + 1
+            blt s1 t0 dump_misa_loop
+
             jal ra crlf
 
             jal x0 shutdown
