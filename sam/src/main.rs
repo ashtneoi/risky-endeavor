@@ -145,7 +145,7 @@ fn main() {
         for label in &labels_in_order {
             let addr = labels[label];
             println!(
-                "{:04X}'{:04X}: {}", addr >> 16, addr & 0xFFFF, &label);
+                "{}: {}", u32_to_hex(addr), &label);
         }
         println!();
     }
@@ -169,9 +169,8 @@ fn main() {
                 output.write_all(s.as_bytes()).unwrap();
             } else {
                 println!(
-                    "{:04X}'{:04X}: \"{}\"",
-                    addr >> 16,
-                    addr & 0xFFFF,
+                    "{}: \"{}\"",
+                    u32_to_hex(addr),
                     s,
                 );
             }
@@ -188,9 +187,8 @@ fn main() {
                     }
                 } else {
                     println!(
-                        "{:04X}'{:04X}: pad ({})",
-                        addr >> 16,
-                        addr & 0xFFFF,
+                        "{}: pad ({})",
+                        u32_to_hex(addr),
                         pad,
                     );
                 }
@@ -370,11 +368,9 @@ fn main() {
                     output.write_all(&insn.to_le_bytes()).unwrap();
                 } else {
                     println!(
-                        "{:04X}'{:04X}: {:04X}'{:04X}  {}",
-                        addr >> 16,
-                        addr & 0xFFFF,
-                        insn >> 16,
-                        insn & 0xFFFF,
+                        "{}: {}  {}",
+                        u32_to_hex(addr),
+                        u32_to_hex(insn),
                         line_trimmed,
                     );
                 }
