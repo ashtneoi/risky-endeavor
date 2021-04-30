@@ -65,20 +65,28 @@ $loop
             srli a0 a0 #10
             jal ra write_hex_u16
             jal ra crlf
+            jal ra crlf
 
-            lw a0 s0 #0
+            addi s2 s0 #0
+            addi s3 s2 #40
+
+$inner_loop
+            lw a0 s2 #0
             jal ra write_hex_u32
             jal ra crlf
-            lw a0 s0 #4
+            lw a0 s2 #4
             jal ra write_hex_u32
             jal ra crlf
-            lw a0 s0 #8
+            lw a0 s2 #8
             jal ra write_hex_u32
             jal ra crlf
-            lw a0 s0 #C
+            lw a0 s2 #C
             jal ra write_hex_u32
             jal ra crlf
             jal ra crlf
+
+            addi s2 s2 #10
+            blt s2 s3 inner_loop
 
 $loop_next
             lui t0 #1
