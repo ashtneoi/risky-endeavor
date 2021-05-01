@@ -65,6 +65,14 @@ $loop
             addi t0 t0 #976
             bne a0 t0 loop_next ; not a virtio device
 
+            lw a0 s0 #4 ; Version
+            addi t0 x0 #1
+            beq a0 t0 loop_good
+            addi t0 x0 #2
+            bne a0 t0 loop_next
+            ; fall through to loop_good
+
+$loop_good
             lw a0 s0 #8 ; DeviceID
             beq a0 x0 loop_next ; no device present
 
