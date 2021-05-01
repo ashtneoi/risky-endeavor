@@ -114,7 +114,7 @@ $not_console
 $loop_next
             lui t0 #1
             add s0 s0 t0
-            blt s0 s1 loop
+            bltu s0 s1 loop
 
             jal x0 shutdown
 
