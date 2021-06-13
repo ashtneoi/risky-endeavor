@@ -67,6 +67,7 @@ fn main() {
     mnemonics.insert(   "add", (InsnType::R,    0x0000_0033));
     mnemonics.insert(   "sub", (InsnType::R,    0x4000_0033));
     mnemonics.insert(  "sltu", (InsnType::R,    0x0000_3033));
+    mnemonics.insert(   "xor", (InsnType::R,    0x0000_4033));
     mnemonics.insert(    "or", (InsnType::R,    0x0000_6033));
     mnemonics.insert(   "and", (InsnType::R,    0x0000_7033));
     mnemonics.insert( "fence", (InsnType::F,    0x0000_000F));
