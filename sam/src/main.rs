@@ -52,6 +52,7 @@ fn main() {
     mnemonics.insert(   "beq", (InsnType::B,    0x0000_0063));
     mnemonics.insert(   "bne", (InsnType::B,    0x0000_1063));
     mnemonics.insert(   "blt", (InsnType::B,    0x0000_4063));
+    mnemonics.insert(   "bge", (InsnType::B,    0x0000_5063));
     mnemonics.insert(  "bltu", (InsnType::B,    0x0000_6063));
     mnemonics.insert(    "lb", (InsnType::I,    0x0000_0003));
     mnemonics.insert(    "lh", (InsnType::I,    0x0000_1003));
@@ -61,6 +62,7 @@ fn main() {
     mnemonics.insert(    "sw", (InsnType::S,    0x0000_2023));
     mnemonics.insert(  "addi", (InsnType::I,    0x0000_0013));
     mnemonics.insert(   "nop", (InsnType::X,    0x0000_0013));
+    mnemonics.insert(   "ori", (InsnType::I,    0x0000_6013));
     mnemonics.insert(  "andi", (InsnType::I,    0x0000_7013));
     mnemonics.insert(  "slli", (InsnType::Sxli, 0x0000_1013));
     mnemonics.insert(  "srli", (InsnType::Sxli, 0x0000_5013));
