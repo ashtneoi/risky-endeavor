@@ -6,6 +6,7 @@ use std::io::{self, prelude::*};
 
 #[derive(Clone, Copy)]
 enum InsnType {
+    P, // pseudo
     X, // inherent
     R,
     I,
@@ -39,6 +40,264 @@ fn parse_pred_succ(s: &str) -> Result<u32, String> {
 
 fn u32_to_hex(x: u32) -> String {
     format!("{:04X}'{:04X}", x >> 16, x & 0xFFFF)
+}
+
+fn upper_imm20_to_hex(x: u32) -> String {
+    format!("{:04X}'{:01X}", x >> 4, x & 0xF)
+}
+
+fn assemble_line(
+    mnemonics: &HashMap<&str, (InsnType, u32)>,
+    addr: u32,
+    string_lens: &HashMap<String, u32>,
+    labels: &HashMap<String, u32>,
+    line: &str,
+    print_insns: bool,
+) -> Vec<u32> {
+    let mut parts = line.split_ascii_whitespace();
+    let mnemonic = parts.next().expect("missing mnemonic");
+    let (insn_type, template) = *mnemonics.get(&mnemonic)
+        .unwrap_or_else(|| panic!("unknown mnemonic '{}'", &mnemonic));
+    let mut insns = vec![];
+    let print_first_insn = match insn_type {
+        InsnType::P => {
+            if mnemonic == "li" {
+                let rd_str = parts.next().expect("missing rd");
+                let _ = parse_reg(rd_str).unwrap();
+                let imm_str = parts.next().expect("missing imm32");
+                let imm_str1: String;
+                let imm_str2: String;
+                if imm_str.starts_with('%') {
+                    let label = &imm_str["%".len()..];
+                    if !string_lens.contains_key(label) {
+                        panic!("unknown label '{}'", label);
+                    }
+                    imm_str1 = imm_str.to_owned();
+                    imm_str2 = imm_str.to_owned();
+                } else if labels.contains_key(imm_str) {
+                    imm_str1 = imm_str.to_owned();
+                    imm_str2 = imm_str.to_owned();
+                } else {
+                    let imm32 = from_hex(imm_str, 32).unwrap();
+                    imm_str1 = format!("#{}", upper_imm20_to_hex(
+                        ((imm32 >> 12) + ((imm32 >> 11) & 1)) & 0xF_FFFF
+                    ));
+                    imm_str2 = format!("#{:03X}", imm32 & 0xFFF);
+                };
+                insns.append(&mut assemble_line(
+                    mnemonics,
+                    addr,
+                    string_lens,
+                    labels,
+                    &format!("lui {} {}", &rd_str, &imm_str1),
+                    true,
+                ));
+                insns.append(&mut assemble_line(
+                    mnemonics,
+                    addr + 4,
+                    string_lens,
+                    labels,
+                    &format!("addi {} {} {}", &rd_str, &rd_str, &imm_str2),
+                    true,
+                ));
+                false
+            } else {
+                unreachable!();
+            }
+        },
+        InsnType::X => {
+            insns.push(template);
+            print_insns
+        },
+        InsnType::R => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let rs2 = parts.next().expect("missing rs2");
+            let rs2 = parse_reg(rs2).unwrap();
+            insns[0] += (rd << 7) + (rs1 << 15) + (rs2 << 20);
+            print_insns
+        },
+        InsnType::Sxli => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let imm = parts.next().expect("missing imm5");
+            let imm = from_hex(imm, 5).unwrap();
+            insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
+            print_insns
+        },
+        InsnType::I => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let imm_str = parts.next().expect("missing imm12");
+            let imm = if imm_str.starts_with('%') {
+                let label = &imm_str["%".len()..];
+                let len = *string_lens.get(label)
+                    .unwrap_or_else(
+                        || panic!("unknown label '{}'", label))
+                    as u32;
+                len & 0xFFF
+            } else if let Some(&x) = labels.get(imm_str) {
+                x & 0xFFF
+            } else {
+                from_hex(imm_str, 12).unwrap()
+            };
+            insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
+            print_insns
+        },
+        InsnType::S => {
+            insns.push(template);
+            let rs2 = parts.next().expect("missing rs2");
+            let rs2 = parse_reg(rs2).unwrap();
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let imm = parts.next().expect("missing imm12");
+            let imm = from_hex(imm, 12).unwrap();
+            insns[0] += (rs1 << 15) + (rs2 << 20);
+            insns[0] += imm << (31-11) >> (31-11+5) << 25;
+            insns[0] += imm << (31-4) >> (31-4+0) << 7;
+            print_insns
+        },
+        InsnType::B => {
+            insns.push(template);
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let rs2 = parts.next().expect("missing rs2");
+            let rs2 = parse_reg(rs2).unwrap();
+            let imm_str = parts.next().expect("missing imm13");
+            let imm = if imm_str.starts_with('#')
+                    || imm_str.starts_with('-') {
+                let imm = from_hex(imm_str, 13).unwrap();
+                if imm & 0x3 != 0 {
+                    panic!("low two bits of imm13 must be 0");
+                }
+                imm
+            } else {
+                let label_addr = labels.get(imm_str).unwrap_or_else(
+                    || panic!("unknown label '{}'", imm_str));
+                let displacement = label_addr.wrapping_sub(addr);
+                if (displacement as i32) < -0x1000
+                        || (displacement as i32) > 0xFFF {
+                    panic!(
+                        "displacement {} is too large \
+                            for 13-bit immediate",
+                        u32_to_hex(displacement),
+                    );
+                }
+                displacement
+            };
+            insns[0] += (rs1 << 15) + (rs2 << 20);
+            insns[0] += imm << (31-12) >> (31-12+12) << 31;
+            insns[0] += imm << (31-10) >> (31-10+5) << 25;
+            insns[0] += imm << (31-4) >> (31-4+1) << 8;
+            insns[0] += imm << (31-11) >> (31-11+11) << 7;
+            print_insns
+        },
+        InsnType::U => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let imm_str = parts.next().expect("missing imm20");
+            let imm = if imm_str.starts_with('%') {
+                let label = &imm_str["%".len()..];
+                let len = *string_lens.get(label)
+                    .unwrap_or_else(
+                        || panic!("unknown label '{}'", label))
+                    as u32;
+                // counteract sign extension of addi immediate
+                (len >> 12) + ((len >> 11) & 1)
+            } else if let Some(&x) = labels.get(imm_str) {
+                // counteract sign extension of addi immediate
+                (x >> 12) + ((x >> 11) & 1)
+            } else {
+                from_hex(imm_str, 20).unwrap()
+            };
+            insns[0] += (rd << 7) + (imm << 12);
+            print_insns
+        },
+        InsnType::J => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let imm_str = parts.next().expect("missing imm21");
+            let imm = if imm_str.starts_with('#')
+                    || imm_str.starts_with('-') {
+                let imm = from_hex(imm_str, 21).unwrap();
+                if imm & 0x3 != 0 {
+                    panic!("last two bits of imm21 must be 0");
+                }
+                imm
+            } else {
+                let label_addr = labels.get(imm_str).unwrap_or_else(
+                    || panic!("unknown label '{}'", imm_str));
+                let displacement = label_addr.wrapping_sub(addr);
+                if (displacement as i32) < -0x10_0000
+                        || (displacement as i32) > 0xF_FFFF {
+                    panic!(
+                        "displacement {} is too large \
+                            for 21-bit immediate",
+                        u32_to_hex(displacement),
+                    );
+                }
+                displacement
+            };
+            insns[0] += rd << 7;
+            insns[0] += imm << (31-20) >> (31-20+20) << 31;
+            insns[0] += imm << (31-10) >> (31-10+1) << 21;
+            insns[0] += imm << (31-11) >> (31-11+11) << 20;
+            insns[0] += imm << (31-19) >> (31-19+12) << 12;
+            print_insns
+        },
+        InsnType::F => {
+            insns.push(template);
+            let pred = parts.next().expect("missing pred");
+            let pred = parse_pred_succ(pred).unwrap();
+            let succ = parts.next().expect("missing succ");
+            let succ = parse_pred_succ(succ).unwrap();
+            insns[0] += (pred << 24) + (succ << 20);
+            print_insns
+        },
+        InsnType::C => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let rs1 = parts.next().expect("missing rs1");
+            let rs1 = parse_reg(rs1).unwrap();
+            let csr = parts.next().expect("missing csr");
+            let csr = from_hex(csr, 12).unwrap();
+            insns[0] += (rd << 7) + (rs1 << 15) + (csr << 20);
+            print_insns
+        },
+        InsnType::Ci => {
+            insns.push(template);
+            let rd = parts.next().expect("missing rd");
+            let rd = parse_reg(rd).unwrap();
+            let uimm = parts.next().expect("missing uimm5");
+            let uimm = from_hex(uimm, 5).unwrap();
+            let csr = parts.next().expect("missing csr");
+            let csr = from_hex(csr, 12).unwrap();
+            insns[0] += (rd << 7) + (uimm << 15) + (csr << 20);
+            print_insns
+        },
+    };
+    assert!(insns.len() >= 1);
+    assert_eq!(parts.next(), None, "trailing operands");
+
+    if print_first_insn {
+        println!(
+            "{}: {}  {}", u32_to_hex(addr), u32_to_hex(insns[0]), line
+        );
+    }
+
+    insns
 }
 
 fn main() {
@@ -81,6 +340,7 @@ fn main() {
     mnemonics.insert("csrrsi", (InsnType::Ci,   0x0000_6073));
     mnemonics.insert(  "mret", (InsnType::X,    0x3020_0073));
     mnemonics.insert(   "wfi", (InsnType::X,    0x1050_0073));
+    mnemonics.insert(    "li", (InsnType::P,              0));
     let mnemonics = mnemonics;
 
     let mut labels = HashMap::new();
@@ -137,7 +397,20 @@ fn main() {
             for label in pending_labels.drain(..) {
                 labels.insert(label, addr);
             }
-            addr += 4;
+            let mut parts = line.split_ascii_whitespace();
+            let mnemonic = parts.next().expect("missing mnemonic");
+            let (insn_type, _) = *mnemonics.get(&mnemonic)
+                .unwrap_or_else(|| panic!("unknown mnemonic '{}'", &mnemonic));
+            match insn_type {
+                InsnType::P => {
+                    if mnemonic == "li" {
+                        addr += 8;
+                    } else {
+                        unreachable!();
+                    }
+                },
+                _ => addr += 4,
+            }
         }
     }
     for label in pending_labels.drain(..) {
@@ -197,185 +470,12 @@ fn main() {
                 }
                 addr += pad;
             }
-            let mut parts = line.split_ascii_whitespace();
-            let mnemonic = parts.next().expect("missing mnemonic");
-            let (insn_type, template) = *mnemonics.get(&mnemonic)
-                .unwrap_or_else(|| panic!("unknown mnemonic '{}'", &mnemonic));
-            let mut insns = vec![template];
-            match insn_type {
-                InsnType::X => {
-                    // already done
-                },
-                InsnType::R => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let rs2 = parts.next().expect("missing rs2");
-                    let rs2 = parse_reg(rs2).unwrap();
-                    insns[0] += (rd << 7) + (rs1 << 15) + (rs2 << 20);
-                },
-                InsnType::Sxli => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let imm = parts.next().expect("missing imm5");
-                    let imm = from_hex(imm, 5).unwrap();
-                    insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
-                },
-                InsnType::I => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let imm_str = parts.next().expect("missing imm12");
-                    let imm = if imm_str.starts_with('%') {
-                        let label = &imm_str["%".len()..];
-                        let len = *string_lens.get(label)
-                            .unwrap_or_else(
-                                || panic!("unknown label '{}'", label))
-                            as u32;
-                        len & 0xFFF
-                    } else if let Some(&x) = labels.get(imm_str) {
-                        x & 0xFFF
-                    } else {
-                        from_hex(imm_str, 12).unwrap()
-                    };
-                    insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
-                },
-                InsnType::S => {
-                    let rs2 = parts.next().expect("missing rs2");
-                    let rs2 = parse_reg(rs2).unwrap();
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let imm = parts.next().expect("missing imm12");
-                    let imm = from_hex(imm, 12).unwrap();
-                    insns[0] += (rs1 << 15) + (rs2 << 20);
-                    insns[0] += imm << (31-11) >> (31-11+5) << 25;
-                    insns[0] += imm << (31-4) >> (31-4+0) << 7;
-                },
-                InsnType::B => {
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let rs2 = parts.next().expect("missing rs2");
-                    let rs2 = parse_reg(rs2).unwrap();
-                    let imm_str = parts.next().expect("missing imm13");
-                    let imm = if imm_str.starts_with('#')
-                            || imm_str.starts_with('-') {
-                        let imm = from_hex(imm_str, 13).unwrap();
-                        if imm & 0x3 != 0 {
-                            panic!("low two bits of imm13 must be 0");
-                        }
-                        imm
-                    } else {
-                        let label_addr = labels.get(imm_str).unwrap_or_else(
-                            || panic!("unknown label '{}'", imm_str));
-                        let displacement = label_addr.wrapping_sub(addr);
-                        if (displacement as i32) < -0x1000
-                                || (displacement as i32) > 0xFFF {
-                            panic!(
-                                "displacement {} is too large \
-                                    for 13-bit immediate",
-                                u32_to_hex(displacement),
-                            );
-                        }
-                        displacement
-                    };
-                    insns[0] += (rs1 << 15) + (rs2 << 20);
-                    insns[0] += imm << (31-12) >> (31-12+12) << 31;
-                    insns[0] += imm << (31-10) >> (31-10+5) << 25;
-                    insns[0] += imm << (31-4) >> (31-4+1) << 8;
-                    insns[0] += imm << (31-11) >> (31-11+11) << 7;
-                },
-                InsnType::U => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let imm_str = parts.next().expect("missing imm20");
-                    let imm = if imm_str.starts_with('%') {
-                        let label = &imm_str["%".len()..];
-                        let len = *string_lens.get(label)
-                            .unwrap_or_else(
-                                || panic!("unknown label '{}'", label))
-                            as u32;
-                        // counteract sign extension of addi immediate
-                        (len >> 12) + ((len >> 11) & 1)
-                    } else if let Some(&x) = labels.get(imm_str) {
-                        // counteract sign extension of addi immediate
-                        (x >> 12) + ((x >> 11) & 1)
-                    } else {
-                        from_hex(imm_str, 20).unwrap()
-                    };
-                    insns[0] += (rd << 7) + (imm << 12);
-                },
-                InsnType::J => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let imm_str = parts.next().expect("missing imm21");
-                    let imm = if imm_str.starts_with('#')
-                            || imm_str.starts_with('-') {
-                        let imm = from_hex(imm_str, 21).unwrap();
-                        if imm & 0x3 != 0 {
-                            panic!("last two bits of imm21 must be 0");
-                        }
-                        imm
-                    } else {
-                        let label_addr = labels.get(imm_str).unwrap_or_else(
-                            || panic!("unknown label '{}'", imm_str));
-                        let displacement = label_addr.wrapping_sub(addr);
-                        if (displacement as i32) < -0x10_0000
-                                || (displacement as i32) > 0xF_FFFF {
-                            panic!(
-                                "displacement {} is too large \
-                                    for 21-bit immediate",
-                                u32_to_hex(displacement),
-                            );
-                        }
-                        displacement
-                    };
-                    insns[0] += rd << 7;
-                    insns[0] += imm << (31-20) >> (31-20+20) << 31;
-                    insns[0] += imm << (31-10) >> (31-10+1) << 21;
-                    insns[0] += imm << (31-11) >> (31-11+11) << 20;
-                    insns[0] += imm << (31-19) >> (31-19+12) << 12;
-                },
-                InsnType::F => {
-                    let pred = parts.next().expect("missing pred");
-                    let pred = parse_pred_succ(pred).unwrap();
-                    let succ = parts.next().expect("missing succ");
-                    let succ = parse_pred_succ(succ).unwrap();
-                    insns[0] += (pred << 24) + (succ << 20);
-                },
-                InsnType::C => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let rs1 = parts.next().expect("missing rs1");
-                    let rs1 = parse_reg(rs1).unwrap();
-                    let csr = parts.next().expect("missing csr");
-                    let csr = from_hex(csr, 12).unwrap();
-                    insns[0] += (rd << 7) + (rs1 << 15) + (csr << 20);
-                },
-                InsnType::Ci => {
-                    let rd = parts.next().expect("missing rd");
-                    let rd = parse_reg(rd).unwrap();
-                    let uimm = parts.next().expect("missing uimm5");
-                    let uimm = from_hex(uimm, 5).unwrap();
-                    let csr = parts.next().expect("missing csr");
-                    let csr = from_hex(csr, 12).unwrap();
-                    insns[0] += (rd << 7) + (uimm << 15) + (csr << 20);
-                },
-            }
-            assert_eq!(parts.next(), None, "trailing operands");
+            let insns = assemble_line(
+                &mnemonics, addr, &string_lens, &labels, line, output.is_none()
+            );
             for insn in insns {
                 if let Some(ref mut output) = output {
                     output.write_all(&insn.to_le_bytes()).unwrap();
-                } else {
-                    println!(
-                        "{}: {}  {}",
-                        u32_to_hex(addr),
-                        u32_to_hex(insn),
-                        line_trimmed,
-                    );
                 }
                 addr += 4;
             }
