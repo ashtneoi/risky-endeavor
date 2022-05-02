@@ -90,7 +90,7 @@ fn assemble_line(
                     string_lens,
                     labels,
                     &format!("lui {} {}", &rd_str, &imm_str1),
-                    true,
+                    print_insns,
                 ));
                 insns.append(&mut assemble_line(
                     mnemonics,
@@ -98,7 +98,7 @@ fn assemble_line(
                     string_lens,
                     labels,
                     &format!("addi {} {} {}", &rd_str, &rd_str, &imm_str2),
-                    true,
+                    print_insns,
                 ));
                 false
             } else {
