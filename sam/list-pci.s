@@ -51,14 +51,19 @@ $bad_mtvec
             jal x0 shutdown
 
 $main
-            lui s0 #3000'0
-            lui s1 #4000'0
+            ; s0 = current PCI function
+            lui s0 #3000'0 ; s0 = #3000'0000
+            ; s1 = end of PCI config space
+            lui s1 #4000'0 ; s1 = #4000'0000
 
+            ; iterate over all PCI function config spaces in ECAM
 $loop
             lw a0 s0 #0
-            lui t1 #1'0 ; t1 = #FFFF
-            addi t1 t1 #FFF
+            lui t1 #1'0
+            addi t1 t1 #FFF ; t1 = #FFFF
             and a0 a0 t1
+            ; if vendor ID is #FFFF
+            ; (no function is present)
             beq a0 t1 loop_next
 
             slli a0 s0 #4
@@ -71,6 +76,7 @@ $loop
             addi s3 s2 #40
 
 $inner_loop
+            ; dump the conventional PCI common config space
             lw a0 s2 #0
             jal ra write_hex_u32
             jal ra crlf
@@ -89,7 +95,7 @@ $inner_loop
             blt s2 s3 inner_loop
 
 $loop_next
-            lui t0 #1
+            lui t0 #1 ; t0 = #1000
             add s0 s0 t0
             blt s0 s1 loop
 
