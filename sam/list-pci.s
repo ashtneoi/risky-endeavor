@@ -73,8 +73,8 @@ $loop
             addi s2 s0 #0
             addi s3 s2 #40
 
+            ; dump the config space header
 $inner_loop
-            ; dump the conventional PCI common config space
             lw a0 s2 #0
             jal ra write_hex_u32
             jal ra crlf
