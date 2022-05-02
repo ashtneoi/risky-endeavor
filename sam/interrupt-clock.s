@@ -8,8 +8,7 @@ $start
             csrrw x0 t0 #340 ; mscratch
 
             ; set up mtvec
-            lui t0 #8000'0 ; #8000'0030 vectored
-            addi t0 t0 #031
+            li t0 #8000'0031 ; #8000'0030 vectored
             csrrw x0 t0 #305 ; mtvec
             csrrs t1 x0 #305
             bne t0 t1 bad_mtvec
@@ -52,8 +51,7 @@ $bad_mtvec
 
 $main
             addi a0 x0 #9
-            lui a1 hi_there
-            addi a1 a1 hi_there
+            li a1 hi_there
             jal ra write_str
             jal ra crlf
 
@@ -88,8 +86,7 @@ $hi_there
 ;;;
 $add_1sec
             ; {a1,a0} += #98'9680
-            lui t0 #98'9
-            addi t0 t0 #680
+            li t0 #98'9680
             add t1 a0 t0
             sltu t2 t1 a0
             addi a0 t1 #0
@@ -287,8 +284,7 @@ $unknown_int
 ;;;
 $shutdown
             lui t1 #100
-            lui t0 #5 ; #5555
-            addi t0 t0 #555
+            li t0 #5555
             sw t0 t1 #0
             wfi
             jal x0 -#4

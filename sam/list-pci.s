@@ -8,8 +8,7 @@ $start
             csrrw x0 t0 #340 ; mscratch
 
             ; set up mtvec
-            lui t0 #8000'0 ; #8000'0030 vectored
-            addi t0 t0 #031
+            li t0 #8000'0031 ; #8000'0030 vectored
             csrrw x0 t0 #305 ; mtvec
             csrrs t1 x0 #305
             bne t0 t1 bad_mtvec
@@ -52,15 +51,14 @@ $bad_mtvec
 
 $main
             ; s0 = current PCI function
-            lui s0 #3000'0 ; s0 = #3000'0000
+            lui s0 #3000'0
             ; s1 = end of PCI config space
-            lui s1 #4000'0 ; s1 = #4000'0000
+            lui s1 #4000'0
 
             ; iterate over all PCI function config spaces in ECAM
 $loop
             lw a0 s0 #0
-            lui t1 #1'0
-            addi t1 t1 #FFF ; t1 = #FFFF
+            li t1 #FFFF
             and a0 a0 t1
             ; if vendor ID is #FFFF
             ; (no function is present)
@@ -95,7 +93,7 @@ $inner_loop
             blt s2 s3 inner_loop
 
 $loop_next
-            lui t0 #1 ; t0 = #1000
+            lui t0 #1
             add s0 s0 t0
             blt s0 s1 loop
 
@@ -218,8 +216,7 @@ $unknown_int
 ;;;
 $shutdown
             lui t1 #100
-            lui t0 #5 ; #5555
-            addi t0 t0 #555
+            li t0 #5555
             sw t0 t1 #0
             wfi
             jal x0 -#4

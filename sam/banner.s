@@ -8,8 +8,7 @@ $start
             csrrw x0 t0 #340 ; mscratch
 
             ; set up mtvec
-            lui t0 #8000'0 ; #8000'0030 vectored
-            addi t0 t0 #031
+            li t0 #8000'0031 ; #8000'0030 vectored
             csrrw x0 t0 #305 ; mtvec
             csrrs t1 x0 #305
             bne t0 t1 bad_mtvec
@@ -52,36 +51,31 @@ $bad_mtvec
 
 $main
             addi a0 x0 %mvendorid
-            lui a1 mvendorid
-            addi a1 a1 mvendorid
+            li a1 mvendorid
             csrrs a2 x0 #F11 ; mvendorid
             jal ra write_format
             jal ra crlf
 
             addi a0 x0 %marchid
-            lui a1 marchid
-            addi a1 a1 marchid
+            li a1 marchid
             csrrs a2 x0 #F12 ; marchid
             jal ra write_format
             jal ra crlf
 
             addi a0 x0 %mimpid
-            lui a1 mimpid
-            addi a1 a1 mimpid
+            li a1 mimpid
             csrrs a2 x0 #F13 ; mimpid
             jal ra write_format
             jal ra crlf
 
             addi a0 x0 %mstatus
-            lui a1 mstatus
-            addi a1 a1 mstatus
+            li a1 mstatus
             csrrs a2 x0 #300 ; mstatus
             jal ra write_format
             jal ra crlf
 
             addi a0 x0 %misa
-            lui a1 misa
-            addi a1 a1 misa
+            li a1 misa
             csrrs a2 x0 #301 ; misa
             jal ra write_format
             addi a0 x0 #20 ; " "
@@ -238,8 +232,7 @@ $unknown_int
 ;;;
 $shutdown
             lui t1 #100
-            lui t0 #5 ; #5555
-            addi t0 t0 #555
+            li t0 #5555
             sw t0 t1 #0
             wfi
             jal x0 -#4
