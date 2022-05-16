@@ -69,13 +69,9 @@ $main
             csrrs x0 t0 #300 ; mstatus
             ; TODO: check that MIE was set?
 
-            addi t0 x0 #3
 $loop
             wfi
-            addi t0 t0 -#1
-            bne t0 x0 loop
-
-            jal x0 shutdown
+            jal x0 loop
 
             inval
 
