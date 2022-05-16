@@ -33,7 +33,7 @@ fn parse_pred_succ(s: &str) -> Result<u32, String> {
         if n & b != 0 {
             return Err(format!("duplicate '{}'", c));
         }
-        n += b;
+        n |= b;
     }
     Ok(n)
 }
