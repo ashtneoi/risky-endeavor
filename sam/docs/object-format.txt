@@ -1,0 +1,76 @@
+Versioning rules:
+
+Consumer: Ignore reserved fields. Later versions may give those fields meaning, but as long as they remain zero the meaning will not change compared to when they were reserved. Earlier versions may define fewer fields, but by the same logic the producer must have set them to zero so the meaning is the same in old versions as for the current version. Later versions may add items to a union, but existing items will not change meaning or be removed. It's safe to interpret a file according to a different version than specified, as long as all fields defined only by the newer version are zero, but you must check.
+
+Producer: Set reserved fields to zero.
+
+Spec: It's okay to change the meaning of existing fields when a new field is nonzero, but the meaning must remain the same as before when all new fields are zero.
+
+
+#00 magic : uuid  % dc867b72-87f7-47da-a770-752af3299a3c
+
+% u32-aligned
+#10 version : u8 = 0  % 0 = unspecified, local use only
+#11 _ : array[3] of u8  % reserved
+
+% these offsets are from start of file
+#14 load-address-offset : u32
+#18 code-and-data-offset : u32
+#1C string-table-offset : u32
+#20 symbol-table-offset : u32
+#24 relocation-table-offset : u32
+
+% u32-aligned
+#28 arch : union[u16]
+    0 none
+    1 risc-v : struct
+        xlen : union[u8]  % same format as misa.MXL, hopefully
+            0 _  % reserved
+            1 b32
+            2 b64
+            3 b128
+        end
+        _ : array[5] of u8  % reserved (TODO: RISC-V extensions?)
+    end
+    #FFFF _  % reserved
+end
+
+load-address : array[Nil] of u8  % little-endian, like everything else
+
+% u32-aligned
+code-and-data : array of u8
+
+% u32-aligned
+% first string (index 0) contains arch-specific info as a string (or whatever, i guess it doesn't matter). symbols can't reference it (in their case 0 means unused symbol table entry).
+string-table : chain of string[u32]
+
+% u32-aligned
+symbol-table : array of struct
+    name : u32  % 0 means this symbol table entry is unused
+    prefix : u32  % 0 means none
+    _  : array[3] of u8  % reserved
+    value : union[u8]
+        0 metadata : struct
+            offset-in-string-table : u32
+        end
+        1 code : struct
+            offset-in-code-and-data : u32
+        end
+        2 data : struct
+            offset-in-code-and-data : u32
+        end
+    end
+end
+
+relocation-table : array of struct
+    offset : u32
+    kind : union[u16]
+        0 unused
+        1 bxx-code-rel-i12 : struct
+            _ : u16
+            symbol : u32
+        end
+    end
+end
+
+chain vs array? either way you can have a mapping from symbol path or relocation offset to the original struct (pointer vs index). and either way you have to read through the whole thing to build that mapping, though the chain approach requires either storing the struct length in the struct (and reading every single one) or inferring it from a union discriminant (for every single one). both would be annoying.
