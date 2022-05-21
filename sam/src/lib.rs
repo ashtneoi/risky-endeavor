@@ -1,3 +1,12 @@
+use std::fmt::Display;
+use std::process::exit;
+
+// Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
+pub fn ouch<E: Display, X>(e: E) -> X {
+    eprintln!("{}", e);
+    exit(1);
+}
+
 pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
     let is_neg = s.starts_with('-');
     let s = if is_neg { &s["-".len()..] } else { s };
@@ -31,6 +40,14 @@ pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
         n = (!n).wrapping_add(1);
     }
     Ok(n)
+}
+
+pub fn u32_to_hex(x: u32) -> String {
+    format!("#{:04X}'{:04X}", x >> 16, x & 0xFFFF)
+}
+
+pub fn upper_imm20_to_hex(x: u32) -> String {
+    format!("#{:04X}'{:01X}", x >> 4, x & 0xF)
 }
 
 pub fn parse_reg(s: &str) -> Result<u32, String> {

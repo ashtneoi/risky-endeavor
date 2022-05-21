@@ -1,11 +1,10 @@
-use sam::{from_hex, parse_reg};
+use sam::{from_hex, ouch, parse_reg, u32_to_hex, upper_imm20_to_hex};
 use std::collections::HashMap;
 use std::error::Error;
 use std::env;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::fs;
 use std::io::{self, prelude::*, SeekFrom};
-use std::process::exit;
 
 // TODO: There should probably be a trait named Peekable, with this struct implementing it. That
 // way we can separate the peeking and counting logic. Hopefully.
@@ -76,14 +75,6 @@ fn parse_pred_succ(s: &str) -> Result<u32, String> {
         n |= b;
     }
     Ok(n)
-}
-
-fn u32_to_hex(x: u32) -> String {
-    format!("{:04X}'{:04X}", x >> 16, x & 0xFFFF)
-}
-
-fn upper_imm20_to_hex(x: u32) -> String {
-    format!("{:04X}'{:01X}", x >> 4, x & 0xF)
 }
 
 #[derive(Debug)]
@@ -683,12 +674,6 @@ fn write_len_prefixed_str<W: Write>(mut w: W, s: &str) -> io::Result<u32> {
         w.write_all(&[0x00])?;
     }
     Ok(final_count)
-}
-
-// Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
-fn ouch<E: Display, X>(e: E) -> X {
-    eprintln!("{}", e);
-    exit(1);
 }
 
 fn main() {
