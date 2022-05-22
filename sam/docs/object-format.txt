@@ -38,14 +38,14 @@ end
 load-address : array[Nil] of u8  % little-endian, like everything else
 
 % u32-aligned
-code-and-data : array of u8
+code-and-data : array[Nil] of u8
 
 % u32-aligned
 % first string (index 0) contains arch-specific info as a string (or whatever, i guess it doesn't matter). symbols can't reference it (in their case 0 means unused symbol table entry).
 string-table : chain of string[u32]
 
 % u32-aligned
-symbol-table : array of struct
+symbol-table : array[Nil] of struct
     name : u32  % 0 means this symbol table entry is unused
     prefix : u32  % 0 means none
     _  : array[3] of u8  % reserved
@@ -62,11 +62,11 @@ symbol-table : array of struct
     end
 end
 
-relocation-table : array of struct
+relocation-table : array[Nil] of struct
     offset : u32
     kind : union[u16]
-        0 unused
-        1 bxx-code-rel-i12 : struct
+        0 unused  % meaning this relocation table entry is unused
+        1 rel-code-b-type : struct
             _ : u16
             symbol : u32
         end
