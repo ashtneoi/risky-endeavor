@@ -8,6 +8,7 @@ pub fn ouch<E: Display, X>(e: E) -> X {
 }
 
 pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
+    assert!(width <= 32);
     let is_neg = s.starts_with('-');
     let s = if is_neg { &s["-".len()..] } else { s };
     if !s.starts_with('#') {
@@ -34,6 +35,7 @@ pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
         };
     }
     if is_neg {
+        assert!(width < 32);
         if n >= 1 << (width-1) {
             return Err("number is too large to negate".to_string());
         }
@@ -86,4 +88,16 @@ pub fn parse_reg(s: &str) -> Result<u32, String> {
             }
         },
     })
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Symbol {
+    Metadata(u32),
+    Code(u32),
+    Data(u32),
+}
+
+#[derive(Debug)]
+pub enum Relocation {
+    RelCodeBType(u32),
 }

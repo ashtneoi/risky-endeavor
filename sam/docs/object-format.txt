@@ -53,6 +53,7 @@ symbol-table : array[Nil] of struct
         0 metadata : struct
             offset-in-string-table : u32
         end
+        % TODO: why does distinction between code and data symbols matter?
         1 code : struct
             offset-in-code-and-data : u32
         end
@@ -63,14 +64,12 @@ symbol-table : array[Nil] of struct
 end
 
 relocation-table : array[Nil] of struct
-    offset : u32
+    offset-in-code-and-data : u32
     kind : union[u16]
         0 unused  % meaning this relocation table entry is unused
         1 rel-code-b-type : struct
             _ : u16
-            symbol : u32
+            symbol-name : u32
         end
     end
 end
-
-chain vs array? either way you can have a mapping from symbol path or relocation offset to the original struct (pointer vs index). and either way you have to read through the whole thing to build that mapping, though the chain approach requires either storing the struct length in the struct (and reading every single one) or inferring it from a union discriminant (for every single one). both would be annoying.

@@ -1,4 +1,4 @@
-use sam::{ouch, u32_to_hex};
+use sam::{ouch, Relocation, Symbol, u32_to_hex};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -26,18 +26,6 @@ fn read_len_prefixed_str<F: Read + Seek>(mut f: F) -> io::Result<String> {
     let padding_len = ((s_len + 3) & !0b11) - s_len;
     f.seek(SeekFrom::Current(padding_len as i64))?;
     Ok(s)
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Symbol {
-    Metadata(u32),
-    Code(u32),
-    Data(u32),
-}
-
-#[derive(Debug)]
-enum Relocation {
-    RelCodeBType(u32),
 }
 
 fn main() {
@@ -96,6 +84,7 @@ fn main() {
             let name = read_u32(&mut input).unwrap_or_else(ouch);
             if name == 0 {
                 // unused entry
+                println!("    (unused entry)");
                 input.seek(SeekFrom::Current(12)).unwrap_or_else(ouch);
                 continue;
             }
@@ -128,10 +117,14 @@ fn main() {
             let relocation = match relocation_kind {
                 0 => {
                     // unused entry
+                    println!("    (unused entry)");
                     input.seek(SeekFrom::Current(6)).unwrap_or_else(ouch);
                     continue;
                 },
-                1 => Relocation::RelCodeBType(read_u32(&mut input).unwrap_or_else(ouch)),
+                1 => {
+                    input.seek(SeekFrom::Current(2)).unwrap_or_else(ouch); // skip reserved bytes
+                    Relocation::RelCodeBType(read_u32(&mut input).unwrap_or_else(ouch))
+                },
                 _ => panic!("unacceptable relocation kind {}", relocation_kind),
             };
             println!("    {}: {:?}", u32_to_hex(offset), &relocation);
