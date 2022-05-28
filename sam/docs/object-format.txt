@@ -9,7 +9,6 @@ Spec: It's okay to change the meaning of existing fields when a new field is non
 
 #00 magic : uuid  % dc867b72-87f7-47da-a770-752af3299a3c
 
-% u32-aligned
 #10 version : u8 = 0  % 0 = unspecified, local use only
 #11 _ : array[3] of u8  % reserved
 
@@ -20,17 +19,10 @@ Spec: It's okay to change the meaning of existing fields when a new field is non
 #20 symbol-table-offset : u32
 #24 relocation-table-offset : u32
 
-% u32-aligned
 #28 arch : union[u16]
     0 none
     1 risc-v : struct
-        xlen : union[u8]  % same format as misa.MXL, hopefully
-            0 _  % reserved
-            1 b32
-            2 b64
-            3 b128
-        end
-        _ : array[5] of u8  % reserved (TODO: RISC-V extensions?)
+        _ : array[6] of u8  % reserved (TODO: RISC-V extensions?)
     end
     #FFFF _  % reserved
 end
@@ -46,30 +38,32 @@ string-table : chain of string[u32]
 
 % u32-aligned
 symbol-table : array[Nil] of struct
-    name : u32  % 0 means this symbol table entry is unused
-    prefix : u32  % 0 means none
-    _  : array[3] of u8  % reserved
+    name-string-offset : u32  % 0 means this symbol table entry is unused
+    _  : array[7] of u8  % reserved
     value : union[u8]
         0 metadata : struct
-            offset-in-string-table : u32
+            value-string-offset : u32
+            _ : u32  % reserved
         end
         % TODO: why does distinction between code and data symbols matter?
         1 code : struct
-            offset-in-code-and-data : u32
+            type-string-offset : u32
+            offset : u32
         end
         2 data : struct
-            offset-in-code-and-data : u32
+            type-string-offset : u32
+            offset : u32
         end
     end
 end
 
 relocation-table : array[Nil] of struct
-    offset-in-code-and-data : u32
+    offset : u32
+    symbol-index : u32
     kind : union[u16]
         0 unused  % meaning this relocation table entry is unused
         1 rel-code-b-type : struct
             _ : u16
-            symbol-name : u32
         end
     end
 end

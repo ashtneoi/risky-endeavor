@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::fmt::Display;
+use std::io;
+use std::io::prelude::*;
 use std::process::exit;
 
 // Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
@@ -90,14 +93,103 @@ pub fn parse_reg(s: &str) -> Result<u32, String> {
     })
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Symbol {
-    Metadata(u32),
-    Code(u32),
-    Data(u32),
+pub struct RelocationTable {
+    relocations: Vec<Relocation>,
 }
 
-#[derive(Debug)]
-pub enum Relocation {
-    RelCodeBType(u32),
+#[derive(Clone, Copy, Debug)]
+pub struct Relocation {
+    offset: u32,
+    symbol_index: u32,
+    value: RelocationValue,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum RelocationValue {
+    RelCodeBType,
+}
+
+impl Relocation {
+    pub fn symbol<'a>(&self, symbol_table: &'a SymbolTable) -> &'a Symbol {
+        &symbol_table.symbols[self.symbol_index as usize]
+    }
+
+    pub fn serialize(&self, mut writer: impl Write) -> io::Result<()> {
+        writer.write_all(&self.offset.to_le_bytes())?;
+        writer.write_all(&self.symbol_index.to_le_bytes())?;
+        let kind: u16 = match self.value {
+            RelocationValue::RelCodeBType => 1,
+        };
+        writer.write_all(&kind.to_le_bytes())?;
+        writer.write_all(&[0; 2])?; // reserved
+        Ok(())
+    }
+}
+
+pub struct SymbolTable {
+    name_to_symbol_index: HashMap<String, u32>,
+    symbols: Vec<Symbol>,
+}
+
+impl SymbolTable {
+    pub fn get_symbol<'a>(&'a self, name: &str) -> Option<&'a Symbol> {
+        self.name_to_symbol_index.get(name)
+            .map(|&symbol_index| &self.symbols[symbol_index as usize])
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Symbol {
+    name_index: u32,
+    value: SymbolValue,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SymbolValue {
+    Metadata { value_index: u32 },
+    Code { type_index: u32, offset: u32 },
+    Data { type_index: u32, offset: u32 },
+}
+
+impl Symbol {
+    pub fn name<'a>(&self, string_table: &'a StringTable) -> &'a str {
+        &string_table.strings[self.name_index as usize].1
+    }
+
+    pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
+        writer.write_all(&string_table.strings[self.name_index as usize].0.to_le_bytes())?;
+        writer.write_all(&[0; 7])?;
+        match self.value {
+            SymbolValue::Metadata { value_index } => {
+                writer.write_all(&0u8.to_le_bytes())?;
+                writer.write_all(&string_table.strings[value_index as usize].0.to_le_bytes())?;
+                writer.write_all(&[0; 4])?;
+            },
+            SymbolValue::Code { type_index, offset } => {
+                writer.write_all(&1u8.to_le_bytes())?;
+                writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
+                writer.write_all(&offset.to_le_bytes())?;
+            },
+            SymbolValue::Data { type_index, offset } => {
+                writer.write_all(&2u8.to_le_bytes())?;
+                writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
+                writer.write_all(&offset.to_le_bytes())?;
+            },
+        }
+        Ok(())
+    }
+}
+
+pub struct StringTable {
+    len: u32,
+    strings: Vec<(u32, String)>, // (offset, value)
+}
+
+impl StringTable {
+    pub fn insert(&mut self, s: String) -> u32 {
+        let offset = self.len;
+        self.len += 4 + s.len() as u32; // string table entries are length-prefixed
+        self.strings.push((offset, s));
+        offset
+    }
 }
