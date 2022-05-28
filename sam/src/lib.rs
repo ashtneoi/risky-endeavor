@@ -97,6 +97,15 @@ pub struct RelocationTable {
     relocations: Vec<Relocation>,
 }
 
+impl RelocationTable {
+    pub fn serialize(&self, mut writer: impl Write) -> io::Result<()> {
+        for relocation in &self.relocations {
+            relocation.serialize(&mut writer)?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Relocation {
     offset: u32,
@@ -135,6 +144,13 @@ impl SymbolTable {
     pub fn get_symbol<'a>(&'a self, name: &str) -> Option<&'a Symbol> {
         self.name_to_symbol_index.get(name)
             .map(|&symbol_index| &self.symbols[symbol_index as usize])
+    }
+
+    pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
+        for symbol in &self.symbols {
+            symbol.serialize(&mut writer, string_table)?;
+        }
+        Ok(())
     }
 }
 
@@ -191,5 +207,13 @@ impl StringTable {
         self.len += 4 + s.len() as u32; // string table entries are length-prefixed
         self.strings.push((offset, s));
         offset
+    }
+
+    pub fn serialize(&self, mut writer: impl Write) -> io::Result<()> {
+        for &(_, ref value) in &self.strings {
+            writer.write_all(&(value.len() as u32).to_le_bytes())?;
+            writer.write_all(value.as_bytes())?;
+        }
+        Ok(())
     }
 }
