@@ -202,6 +202,12 @@ impl OrderedStringSet {
     }
 }
 
+fn parse_imm(
+    width: u32, strings: &OrderedStringSet, symbols: &HashMap<u32, Symbol>
+) -> (u32, Option<Relocation>) {
+    unimplemented!();
+}
+
 fn assemble_line2<W: Write>(
     mnemonics: &HashMap<&str, (InsnType, u32)>,
     line_num: usize,
@@ -303,8 +309,8 @@ fn assemble_line2<W: Write>(
             skip_whitespace(&mut chars);
             let rs1 = parse_reg_here("rs1", &mut chars)?;
             skip_whitespace(&mut chars);
-            let imm = parse_imm_here(5, &mut chars)?;
-            let insn = template + (rd << 7) + (rs1 << 15) + (imm << 20);
+            let imm5 = parse_imm_here(5, &mut chars)?;
+            let insn = template + (rd << 7) + (rs1 << 15) + (imm5 << 20);
             code_and_data.write(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
@@ -312,28 +318,20 @@ fn assemble_line2<W: Write>(
                 })?;
             Ok(4)
         },
-        // InsnType::I => {
-        //     insns.push(template);
-        //     let rd = parts.next().expect("missing rd");
-        //     let rd = parse_reg(rd).unwrap();
-        //     let rs1 = parts.next().expect("missing rs1");
-        //     let rs1 = parse_reg(rs1).unwrap();
-        //     let imm_str = parts.next().expect("missing imm12");
-        //     let imm = if imm_str.starts_with('%') {
-        //         let label = &imm_str["%".len()..];
-        //         let len = *string_lens.get(label)
-        //             .unwrap_or_else(
-        //                 || panic!("unknown label '{}'", label))
-        //             as u32;
-        //         len & 0xFFF
-        //     } else if let Some(&x) = labels.get(imm_str) {
-        //         x & 0xFFF
-        //     } else {
-        //         from_hex(imm_str, 12).unwrap()
-        //     };
-        //     insns[0] += (rd << 7) + (rs1 << 15) + (imm << 20);
-        //     print_insns
-        // },
+        InsnType::I => {
+            let rd = parse_reg_here("rd", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let rs1 = parse_reg_here("rs1", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let imm12 = parse_imm_here(12, &mut chars)?;
+            let insn = template + (rd << 7) + (rs1 << 15) + (imm12 << 20);
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
         // InsnType::S => {
         //     insns.push(template);
         //     let rs2 = parts.next().expect("missing rs2");
@@ -351,7 +349,7 @@ fn assemble_line2<W: Write>(
             let rs1 = parse_reg_here("rs1", &mut chars)?;
             skip_whitespace(&mut chars);
             let rs2 = parse_reg_here("rs2", &mut chars)?;
-            let mut insn = (rs1 << 15) + (rs2 << 20);
+            let mut insn = template + (rs1 << 15) + (rs2 << 20);
             skip_whitespace(&mut chars);
             if chars.peek().is_none() {
                 return Err(AssemblerError::Syntax {
