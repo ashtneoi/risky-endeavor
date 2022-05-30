@@ -1,4 +1,17 @@
-use sam::{from_hex, ouch, parse_reg, Relocation, Symbol, u32_to_hex, upper_imm20_to_hex};
+use sam::{
+    from_hex,
+    ouch,
+    parse_reg,
+    Relocation,
+    RelocationTable,
+    RelocationValue,
+    StringTable,
+    Symbol,
+    SymbolTable,
+    SymbolValue,
+    u32_to_hex,
+    upper_imm20_to_hex,
+};
 use std::collections::{HashMap};
 use std::error::Error;
 use std::env;
@@ -208,15 +221,15 @@ fn parse_imm(
     unimplemented!();
 }
 
-fn assemble_line2<W: Write>(
+fn assemble_line2(
     mnemonics: &HashMap<&str, (InsnType, u32)>,
     line_num: usize,
     line: &str,
     insn_offset: u32, // object format only supports 2^32 bytes of code
-    strings: &mut OrderedStringSet,
-    symbols: &mut HashMap<u32, Symbol>, // string index => symbol
-    relocations: &mut Vec<(u32, Relocation)>,
-    mut code_and_data: W,
+    strings: &mut StringTable,
+    symbols: &mut SymbolTable,
+    relocations: &mut RelocationTable,
+    mut code_and_data: impl Write,
 ) -> Result<usize, AssemblerError> {
     let mut chars = Peekable::new(line.char_indices());
 
@@ -231,16 +244,21 @@ fn assemble_line2<W: Write>(
     let word_pos = chars.pos;
     let (_, word) = collect_word(&mut chars);
     if word.starts_with('$') {
-        let string_index = strings.get_or_insert(word["$".len()..].to_owned());
-        // TODO: we don't know it's code. add it to a pending set then choose symbol type based on insn/directive that follows
-        if symbols.contains_key(&string_index) {
+        let name = &word["$".len()..];
+        let name_index = strings.get_index_or_insert(name);
+        // FIXME: if symbol is present but external, just replace it.
+        if symbols.contains_name(name_index) {
             return Err(AssemblerError::DuplicateLabel {
                 line_num,
                 col_num: word_pos,
-                label: word["$".len()..].to_owned(),
+                label: name.to_owned(),
             });
         }
-        symbols.insert(string_index, Symbol::Code(insn_offset));
+        // TODO: we don't know it's code. add it to a pending set then choose symbol type based on insn/directive that follows
+        symbols.get_index_or_insert(name_index, SymbolValue::Code {
+            type_index: 0, // none
+            offset: Some(insn_offset),
+        });
         return Ok(0);
     }
     let mnemonic = word;
@@ -361,10 +379,17 @@ fn assemble_line2<W: Write>(
             let target_pos = chars.pos;
             let (_, target) = collect_word(&mut chars);
             if is_identifier(&target) {
-                let string_index = strings.get_or_insert(target);
-                relocations.push(
-                    (insn_offset, Relocation::RelCodeBType(string_index))
-                );
+                relocations.relocations.push(Relocation {
+                    offset: insn_offset,
+                    symbol_index: symbols.get_index_or_insert(
+                        strings.get_index_or_insert(&target),
+                        SymbolValue::Code {
+                            type_index: 0, // none
+                            offset: None,
+                        },
+                    ),
+                    value: RelocationValue::RelCodeBType,
+                });
             } else {
                 let imm13 = from_hex(&target, 13).map_err(
                     |e| AssemblerError::Syntax {line_num, col_num: target_pos, msg: e })?;
@@ -806,9 +831,7 @@ fn main() {
         0x00, 0x00, 0x00, 0x00, // symbol-table-offset
         0x00, 0x00, 0x00, 0x00, // relocation-table-offset
         0x01, 0x00, // arch = risc-v
-        0x01, // XLEN = 32
-        0x00, // reserved
-        0x00, 0x00, 0x00, 0x00, // reserved
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // reserved
     ]).unwrap_or_else(ouch);
 
     let load_address_offset = output.stream_position().unwrap_or_else(ouch) as u32;
@@ -816,10 +839,10 @@ fn main() {
 
     let code_and_data_offset = output.stream_position().unwrap_or_else(ouch) as u32;
 
-    let mut strings = OrderedStringSet::new();
-    strings.get_or_insert("".to_owned());
-    let mut symbols: HashMap<u32, Symbol> = HashMap::new();
-    let mut relocations: Vec<(u32, Relocation)> = Vec::new();
+    let mut strings: StringTable = Default::default();
+    strings.get_index_or_insert("");
+    let mut symbols: SymbolTable = Default::default();
+    let mut relocations: RelocationTable = Default::default();
     let mut insn_offset: u32 = 0;
 
     for (line_num, line) in io::BufReader::new(&input).lines().enumerate() {
@@ -841,43 +864,13 @@ fn main() {
     }
 
     let string_table_offset = output.stream_position().unwrap_or_else(ouch) as u32;
-
-    let symbols: Vec<_> = symbols.drain().collect(); // TODO: don't need this
-
-    for s in &strings.order {
-        write_len_prefixed_str(&mut output, s).unwrap_or_else(ouch);
-    }
+    strings.serialize(&mut output).unwrap_or_else(ouch);
 
     let symbol_table_offset = output.stream_position().unwrap_or_else(ouch) as u32;
-
-    for &(k, ref v) in &symbols {
-        output.write_all(&k.to_le_bytes()).unwrap_or_else(ouch); // name
-        output.write_all(&[0x00, 0x00, 0x00, 0x00])
-            .unwrap_or_else(ouch); // prefix
-        output.write_all(&[0x00, 0x00, 0x00])
-            .unwrap_or_else(ouch); // reserved
-        let (kind, offset) = match *v {
-            Symbol::Metadata(x) => (0u8, x),
-            Symbol::Code(x) => (1u8, x),
-            Symbol::Data(x) => (2u8, x),
-        };
-        output.write_all(&[kind])
-            .unwrap_or_else(ouch); // kind
-        output.write_all(&offset.to_le_bytes())
-            .unwrap_or_else(ouch); // offset-in-code-and-data
-    }
+    symbols.serialize(&mut output, &strings).unwrap_or_else(ouch);
 
     let relocation_table_offset = output.stream_position().unwrap_or_else(ouch) as u32;
-
-    for (offset, ref reloc) in &relocations {
-        output.write_all(&offset.to_le_bytes()).unwrap_or_else(ouch); // offset-in-code-and-data
-        let (kind, symbol_index) = match *reloc {
-            Relocation::RelCodeBType(symbol) => (1u16, symbol),
-        };
-        output.write_all(&kind.to_le_bytes()).unwrap_or_else(ouch); // kind
-        output.write_all(&[0, 0]).unwrap_or_else(ouch); // reserved
-        output.write_all(&symbol_index.to_le_bytes()).unwrap_or_else(ouch); // symbol-name
-    }
+    relocations.serialize(&mut output).unwrap_or_else(ouch);
 
     output.seek(SeekFrom::Start(0x14)).unwrap_or_else(ouch);
     output.write_all(&load_address_offset.to_le_bytes()).unwrap_or_else(ouch);
