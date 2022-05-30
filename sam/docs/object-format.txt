@@ -39,18 +39,21 @@ string-table : chain of string[u32]
 % u32-aligned
 symbol-table : array[Nil] of struct
     name-string-offset : u32  % 0 means this symbol table entry is unused
-    _  : array[7] of u8  % reserved
+    _  : array[6] of u8  % reserved
     value : union[u8]
         0 metadata : struct
+            _ : u8  % reserved
             value-string-offset : u32
             _ : u32  % reserved
         end
         % TODO: why does distinction between code and data symbols matter?
         1 code : struct
+            external : bool[u8]
             type-string-offset : u32
             offset : u32
         end
         2 data : struct
+            external : bool[u8]
             type-string-offset : u32
             offset : u32
         end

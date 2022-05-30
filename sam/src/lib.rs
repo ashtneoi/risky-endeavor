@@ -93,8 +93,9 @@ pub fn parse_reg(s: &str) -> Result<u32, String> {
     })
 }
 
+#[derive(Default)]
 pub struct RelocationTable {
-    relocations: Vec<Relocation>,
+    pub relocations: Vec<Relocation>,
 }
 
 impl RelocationTable {
@@ -108,9 +109,9 @@ impl RelocationTable {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Relocation {
-    offset: u32,
-    symbol_index: u32,
-    value: RelocationValue,
+    pub offset: u32,
+    pub symbol_index: u32,
+    pub value: RelocationValue,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -135,15 +136,35 @@ impl Relocation {
     }
 }
 
+#[derive(Default)]
 pub struct SymbolTable {
-    name_to_symbol_index: HashMap<String, u32>,
     symbols: Vec<Symbol>,
+    name_index_to_symbol_index: HashMap<u32, u32>,
 }
 
 impl SymbolTable {
-    pub fn get_symbol<'a>(&'a self, name: &str) -> Option<&'a Symbol> {
-        self.name_to_symbol_index.get(name)
+    fn get<'a>(&'a self, name_index: u32) -> Option<&'a Symbol> {
+        self.name_index_to_symbol_index.get(&name_index)
             .map(|&symbol_index| &self.symbols[symbol_index as usize])
+    }
+
+    pub fn get_index_or_insert(
+        &mut self,
+        name_index: u32,
+        value: SymbolValue,
+    ) -> u32 {
+        if let Some(&index) = self.name_index_to_symbol_index.get(&name_index) {
+            index
+        } else {
+            let index = self.symbols.len() as u32;
+            self.symbols.push(Symbol { name_index, value });
+            self.name_index_to_symbol_index.insert(name_index, index);
+            index
+        }
+    }
+
+    pub fn contains_name(&self, name_index: u32) -> bool {
+        self.name_index_to_symbol_index.contains_key(&name_index)
     }
 
     pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
@@ -163,8 +184,8 @@ pub struct Symbol {
 #[derive(Clone, Copy, Debug)]
 pub enum SymbolValue {
     Metadata { value_index: u32 },
-    Code { type_index: u32, offset: u32 },
-    Data { type_index: u32, offset: u32 },
+    Code { type_index: u32, offset: Option<u32> },
+    Data { type_index: u32, offset: Option<u32> },
 }
 
 impl Symbol {
@@ -174,45 +195,69 @@ impl Symbol {
 
     pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
         writer.write_all(&string_table.strings[self.name_index as usize].0.to_le_bytes())?;
-        writer.write_all(&[0; 7])?;
+        writer.write_all(&[0; 6])?;
         match self.value {
             SymbolValue::Metadata { value_index } => {
                 writer.write_all(&0u8.to_le_bytes())?;
+                writer.write_all(&[0])?;
                 writer.write_all(&string_table.strings[value_index as usize].0.to_le_bytes())?;
                 writer.write_all(&[0; 4])?;
             },
             SymbolValue::Code { type_index, offset } => {
                 writer.write_all(&1u8.to_le_bytes())?;
+                writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
-                writer.write_all(&offset.to_le_bytes())?;
+                writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
             },
             SymbolValue::Data { type_index, offset } => {
                 writer.write_all(&2u8.to_le_bytes())?;
+                writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
-                writer.write_all(&offset.to_le_bytes())?;
+                writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
             },
         }
         Ok(())
     }
 }
 
+#[derive(Default)]
 pub struct StringTable {
     len: u32,
     strings: Vec<(u32, String)>, // (offset, value)
+    lookup: HashMap<String, u32>, // value -> index
 }
 
 impl StringTable {
-    pub fn insert(&mut self, s: String) -> u32 {
+    pub fn get_index_or_insert(&mut self, s: &str) -> u32 {
+        if let Some(&index) = self.lookup.get(s) {
+            index
+        } else {
+            self.insert(s.to_owned())
+        }
+    }
+
+    pub fn get_offset_or_insert(&mut self, s: &str) -> u32 {
+        let index = self.get_index_or_insert(s);
+        self.strings[index as usize].0
+    }
+
+    /// Returns index. s must not be in the table already!
+    fn insert(&mut self, s: String) -> u32 {
         let offset = self.len;
-        self.len += 4 + s.len() as u32; // string table entries are length-prefixed
-        self.strings.push((offset, s));
-        offset
+        let index = self.strings.len() as u32;
+        self.len += 4 + s.len() as u32; // entries are length-prefixed
+        self.strings.push((offset, s.clone()));
+        self.lookup.insert(s, index);
+        index
     }
 
     pub fn serialize(&self, mut writer: impl Write) -> io::Result<()> {
         for &(_, ref value) in &self.strings {
             writer.write_all(&(value.len() as u32).to_le_bytes())?;
             writer.write_all(value.as_bytes())?;
+            for _ in 0..(value.len().wrapping_neg() & 0b11) {
+                writer.write_all(&[0])?;
+            }
         }
         Ok(())
     }
