@@ -214,16 +214,17 @@ fn assemble_line2(
     if word.starts_with('$') {
         let name = &word["$".len()..];
         let name_index = strings.get_index_or_insert(name);
-        // FIXME: if symbol is present but external, just replace it.
-        if symbols.contains_name(name_index) {
-            return Err(AssemblerError::DuplicateLabel {
-                line_num,
-                col_num: word_pos,
-                label: name.to_owned(),
-            });
+        if let Some(sym) = symbols.get(name_index) {
+            if sym.is_external() {
+                return Err(AssemblerError::DuplicateLabel {
+                    line_num,
+                    col_num: word_pos,
+                    label: name.to_owned(),
+                });
+            }
         }
         // TODO: we don't know it's code. add it to a pending set then choose symbol type based on insn/directive that follows
-        symbols.get_index_or_insert(name_index, SymbolValue::Code {
+        symbols.insert(name_index, SymbolValue::Code {
             type_index: 0, // none
             offset: Some(insn_offset),
         });

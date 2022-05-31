@@ -244,7 +244,7 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    fn get<'a>(&'a self, name_index: u32) -> Option<&'a Symbol> {
+    pub fn get<'a>(&'a self, name_index: u32) -> Option<&'a Symbol> {
         self.name_index_to_symbol_index.get(&name_index)
             .map(|&symbol_index| &self.symbols[symbol_index as usize])
     }
@@ -261,11 +261,17 @@ impl SymbolTable {
         }
     }
 
-    fn insert(&mut self, name_index: u32, value: SymbolValue) -> u32 {
-        let index = self.symbols.len() as u32;
-        self.symbols.push(Symbol { name_index, value });
-        self.name_index_to_symbol_index.insert(name_index, index);
-        index
+    // name_index may be in the table already. In this case, the symbol value is updated.
+    pub fn insert(&mut self, name_index: u32, value: SymbolValue) -> u32 {
+        if let Some(&index) = self.name_index_to_symbol_index.get(&name_index) {
+            self.symbols[index as usize] = Symbol { name_index, value };
+            index
+        } else {
+            let index = self.symbols.len() as u32;
+            self.symbols.push(Symbol { name_index, value });
+            self.name_index_to_symbol_index.insert(name_index, index);
+            index
+        }
     }
 
     pub fn contains_name(&self, name_index: u32) -> bool {
@@ -319,6 +325,14 @@ pub enum SymbolValue {
 impl Symbol {
     pub fn name<'a>(&self, string_table: &'a StringTable) -> &'a str {
         &string_table.strings[self.name_index as usize].1
+    }
+
+    pub fn is_external(&self) -> bool {
+        match self.value {
+            SymbolValue::Metadata { .. } => false,
+            SymbolValue::Code { offset, .. }
+            | SymbolValue::Data { offset, .. } => offset.is_some(),
+        }
     }
 
     pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
