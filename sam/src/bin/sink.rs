@@ -81,7 +81,7 @@ fn main() {
             &mut input, file_end_offset - relocation_table_offset
         ).unwrap_or_else(ouch);
         for reloc in &relocation_table.relocations {
-            println!("    {}: {}", u32_to_hex(reloc.offset), reloc.symbol(&symbol_table).name(&string_table));
+            println!("    {}: {}, {:?}", u32_to_hex(reloc.offset), reloc.symbol(&symbol_table).name(&string_table), reloc.value);
         }
     }
 }
