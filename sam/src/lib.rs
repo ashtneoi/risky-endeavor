@@ -170,6 +170,20 @@ impl RelocationTable {
         }
         Ok(())
     }
+
+    pub fn deserialize(mut reader: impl Read, len: u32) -> Result<Self, DeserializationError> {
+        if len & 0xF != 0 {
+            return Err(DeserializationError::PrematureEnd);
+        }
+        let mut table: Self = Default::default();
+        let mut count = 0;
+        while count < len {
+            let reloc = Relocation::deserialize(&mut reader)?;
+            table.relocations.push(reloc);
+            count += 0x10;
+        }
+        Ok(table)
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -181,6 +195,7 @@ pub struct Relocation {
 
 #[derive(Clone, Copy, Debug)]
 pub enum RelocationValue {
+    UnusedEntry,
     RelCodeBType,
 }
 
@@ -193,11 +208,32 @@ impl Relocation {
         writer.write_all(&self.offset.to_le_bytes())?;
         writer.write_all(&self.symbol_index.to_le_bytes())?;
         let kind: u16 = match self.value {
+            RelocationValue::UnusedEntry => 0,
             RelocationValue::RelCodeBType => 1,
         };
         writer.write_all(&kind.to_le_bytes())?;
-        writer.write_all(&[0; 2])?; // reserved
+        writer.write_all(&[0; 6])?; // reserved
         Ok(())
+    }
+
+    pub fn deserialize(mut reader: impl Read) -> Result<Self, DeserializationError> {
+        let offset = read_u32(&mut reader)?;
+        let symbol_index = read_u32(&mut reader)?;
+        let value = match read_u16(&mut reader)? {
+            0 => {
+                read_u16(&mut reader)?;
+                RelocationValue::UnusedEntry
+            },
+            1 => {
+                read_u16(&mut reader)?;
+                RelocationValue::RelCodeBType
+            },
+            n => return Err(DeserializationError::ReservedValue(
+                format!("can't understand relocation value kind {}", n)
+            )),
+        };
+        read_u32(&mut reader)?;
+        Ok(Relocation { offset, symbol_index, value })
     }
 }
 

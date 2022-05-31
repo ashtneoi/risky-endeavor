@@ -6,11 +6,12 @@ Producer: Set reserved fields to zero.
 
 Spec: It's okay to change the meaning of existing fields when a new field is nonzero, but the meaning must remain the same as before when all new fields are zero.
 
+All fields and values named `_` are reserved.
 
 #00 magic : uuid  % dc867b72-87f7-47da-a770-752af3299a3c
 
 #10 version : u8 = 0  % 0 = unspecified, local use only
-#11 _ : array[3] of u8  % reserved
+#11 _ : array[3] of u8
 
 % these offsets are from start of file
 #14 load-address-offset : u32
@@ -24,7 +25,7 @@ Spec: It's okay to change the meaning of existing fields when a new field is non
     1 risc-v : struct
         _ : array[6] of u8  % reserved (TODO: RISC-V extensions?)
     end
-    #FFFF _  % reserved
+    #FFFF _
 end
 
 load-address : array[Nil] of u8  % little-endian, like everything else
@@ -39,12 +40,12 @@ string-table : chain of string[u32]
 % u32-aligned
 symbol-table : array[Nil] of struct
     name-string-offset : u32  % 0 means this symbol table entry is unused
-    _  : array[2] of u8  % reserved
+    _  : array[2] of u8
     value : union[u8]
-        0 metadata : struct
-            _ : u8  % reserved
+        0 metadata : structs
+            _ : u8
             value-string-offset : u32
-            _ : u32  % reserved
+            _ : u32
         end
         % TODO: why does distinction between code and data symbols matter?
         1 code : struct
@@ -69,4 +70,5 @@ relocation-table : array[Nil] of struct
             _ : u16
         end
     end
+    _ : u32
 end

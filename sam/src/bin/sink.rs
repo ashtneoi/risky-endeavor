@@ -5,6 +5,7 @@ use sam::{
     read_u8,
     read_u16,
     read_u32,
+    RelocationTable,
     StringTable,
     Symbol,
     SymbolTable,
@@ -70,54 +71,17 @@ fn main() {
         for symbol in &symbol_table.symbols {
             println!("    {}: {:?}", symbol.name(&string_table), symbol);
         }
-    //     while input.stream_position().unwrap_or_else(ouch) < relocation_table_offset as u64 {
-    //         let name = read_u32(&mut input).unwrap_or_else(ouch);
-    //         if name == 0 {
-    //             // unused entry
-    //             println!("    (unused entry)");
-    //             input.seek(SeekFrom::Current(12)).unwrap_or_else(ouch);
-    //             continue;
-    //         }
-    //         let prefix = read_u32(&mut input).unwrap_or_else(ouch);
-    //         assert_eq!(prefix, 0);
-    //         input.seek(SeekFrom::Current(3)).unwrap_or_else(ouch); // skip reserved bytes
-    //         buf.resize(1, 0);
-    //         input.read_exact(&mut buf).unwrap_or_else(ouch);
-    //         let value_kind = buf[0];
-    //         let value = match value_kind {
-    //             0 => Symbol::Metadata(read_u32(&mut input).unwrap_or_else(ouch)),
-    //             1 => Symbol::Code(read_u32(&mut input).unwrap_or_else(ouch)),
-    //             2 => Symbol::Data(read_u32(&mut input).unwrap_or_else(ouch)),
-    //             _ => panic!("unacceptable value kind {}", value_kind),
-    //         };
-    //         println!("    {:?}: {:?}", &index_to_string[&name], &value);
-    //         string_index_to_symbol.insert(name, value);
-    //     }
-    //     assert_eq!(input.stream_position().unwrap_or_else(ouch), relocation_table_offset as u64);
+        assert_eq!(input.stream_position().unwrap_or_else(ouch), relocation_table_offset as u64);
 
-    //     // dump relocation table
-    //     let file_end_offset = input.seek(SeekFrom::End(0)).unwrap_or_else(ouch);
-    //     input.seek(SeekFrom::Start(relocation_table_offset as u64)).unwrap_or_else(ouch);
-    //     println!("relocation table:");
-    //     while input.stream_position().unwrap_or_else(ouch) < file_end_offset {
-    //         let offset = read_u32(&mut input).unwrap_or_else(ouch);
-    //         let mut buf = [0; 2];
-    //         input.read_exact(&mut buf).unwrap_or_else(ouch);
-    //         let relocation_kind = u16::from_le_bytes(buf);
-    //         let relocation = match relocation_kind {
-    //             0 => {
-    //                 // unused entry
-    //                 println!("    (unused entry)");
-    //                 input.seek(SeekFrom::Current(6)).unwrap_or_else(ouch);
-    //                 continue;
-    //             },
-    //             1 => {
-    //                 input.seek(SeekFrom::Current(2)).unwrap_or_else(ouch); // skip reserved bytes
-    //                 Relocation::RelCodeBType(read_u32(&mut input).unwrap_or_else(ouch))
-    //             },
-    //             _ => panic!("unacceptable relocation kind {}", relocation_kind),
-    //         };
-    //         println!("    {}: {:?}", u32_to_hex(offset), &relocation);
-    //     }
+        // dump relocation table
+        let file_end_offset = input.seek(SeekFrom::End(0)).unwrap_or_else(ouch) as u32;
+        input.seek(SeekFrom::Start(relocation_table_offset as u64)).unwrap_or_else(ouch);
+        println!("relocation table:");
+        let relocation_table = RelocationTable::deserialize(
+            &mut input, file_end_offset - relocation_table_offset
+        ).unwrap_or_else(ouch);
+        for reloc in &relocation_table.relocations {
+            println!("    {}: {}", u32_to_hex(reloc.offset), reloc.symbol(&symbol_table).name(&string_table));
+        }
     }
 }
