@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::io;
 use std::io::prelude::*;
 use std::process::exit;
 
 // Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
 pub fn ouch<E: Display, X>(e: E) -> X {
-    eprintln!("{}", e);
+    eprintln!("Error: {}", e);
     exit(1);
 }
 
@@ -55,6 +55,46 @@ pub fn upper_imm20_to_hex(x: u32) -> String {
     format!("#{:04X}'{:01X}", x >> 4, x & 0xF)
 }
 
+pub fn write_len_prefixed_str(mut w: impl Write, s: &str) -> io::Result<()> {
+    w.write_all(&(s.len() as u32).to_le_bytes())?;
+    w.write_all(s.as_bytes())?;
+    for _ in 0..(s.len().wrapping_neg() & 0b11) {
+        w.write_all(&[0])?;
+    }
+    Ok(())
+}
+
+pub fn read_u8<R: Read>(mut r: R) -> io::Result<u8> {
+    let mut buf = [0; 1];
+    r.read_exact(&mut buf)?;
+    Ok(buf[0])
+}
+
+pub fn read_u16<R: Read>(mut r: R) -> io::Result<u16> {
+    let mut buf = [0; 2];
+    r.read_exact(&mut buf)?;
+    Ok(u16::from_le_bytes(buf))
+}
+
+pub fn read_u32<R: Read>(mut r: R) -> io::Result<u32> {
+    let mut buf = [0; 4];
+    r.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
+}
+
+pub fn read_len_prefixed_str(mut r: impl Read) -> io::Result<String> {
+    let s_len = read_u32(&mut r)?;
+    let mut buf = Vec::with_capacity(s_len as usize);
+    buf.resize(s_len as usize, 0);
+    r.read_exact(&mut buf)?;
+    let s = String::from_utf8(buf).unwrap_or_else(ouch);
+    let padding_len = s_len.wrapping_neg() as usize & 0b11;
+    let mut buf = Vec::with_capacity(padding_len);
+    buf.resize(padding_len, 0);
+    r.read_exact(&mut buf)?;
+    Ok(s)
+}
+
 pub fn parse_reg(s: &str) -> Result<u32, String> {
     Ok(match s {
         "zero" => 0,
@@ -91,6 +131,31 @@ pub fn parse_reg(s: &str) -> Result<u32, String> {
             }
         },
     })
+}
+
+#[derive(Debug)]
+pub enum DeserializationError {
+    Io(io::Error),
+    ReservedValue(String),
+    PrematureEnd,
+    DuplicateItem(String),
+}
+
+impl From<io::Error> for DeserializationError {
+    fn from(e: io::Error) -> Self {
+        DeserializationError::Io(e)
+    }
+}
+
+impl Display for DeserializationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        match *self {
+            Self::Io(ref e) => <io::Error as Display>::fmt(e, f),
+            Self::ReservedValue(ref s) => write!(f, "reserved value; {}", s),
+            Self::PrematureEnd => write!(f, "premature end"),
+            Self::DuplicateItem(ref s) => write!(f, "duplicate item; {}", s),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -138,7 +203,7 @@ impl Relocation {
 
 #[derive(Default)]
 pub struct SymbolTable {
-    symbols: Vec<Symbol>,
+    pub symbols: Vec<Symbol>,
     name_index_to_symbol_index: HashMap<u32, u32>,
 }
 
@@ -156,11 +221,15 @@ impl SymbolTable {
         if let Some(&index) = self.name_index_to_symbol_index.get(&name_index) {
             index
         } else {
-            let index = self.symbols.len() as u32;
-            self.symbols.push(Symbol { name_index, value });
-            self.name_index_to_symbol_index.insert(name_index, index);
-            index
+            self.insert(name_index, value)
         }
+    }
+
+    fn insert(&mut self, name_index: u32, value: SymbolValue) -> u32 {
+        let index = self.symbols.len() as u32;
+        self.symbols.push(Symbol { name_index, value });
+        self.name_index_to_symbol_index.insert(name_index, index);
+        index
     }
 
     pub fn contains_name(&self, name_index: u32) -> bool {
@@ -172,6 +241,29 @@ impl SymbolTable {
             symbol.serialize(&mut writer, string_table)?;
         }
         Ok(())
+    }
+
+    pub fn deserialize(
+        mut reader: impl Read,
+        len: u32,
+        string_table: &StringTable,
+    ) -> Result<Self, DeserializationError> {
+        if len & 0xF != 0 {
+            return Err(DeserializationError::PrematureEnd);
+        }
+        let mut table: Self = Default::default();
+        let mut count = 0;
+        while count < len {
+            let symbol = Symbol::deserialize(&mut reader, string_table)?;
+            if table.contains_name(symbol.name_index) {
+                return Err(DeserializationError::DuplicateItem(
+                    string_table.strings[symbol.name_index as usize].1.clone()
+                ));
+            }
+            table.insert(symbol.name_index, symbol.value);
+            count += 0x10;
+        }
+        Ok(table)
     }
 }
 
@@ -195,22 +287,22 @@ impl Symbol {
 
     pub fn serialize(&self, mut writer: impl Write, string_table: &StringTable) -> io::Result<()> {
         writer.write_all(&string_table.strings[self.name_index as usize].0.to_le_bytes())?;
-        writer.write_all(&[0; 6])?;
+        writer.write_all(&[0; 2])?;
         match self.value {
             SymbolValue::Metadata { value_index } => {
-                writer.write_all(&0u8.to_le_bytes())?;
+                writer.write_all(&[0])?;
                 writer.write_all(&[0])?;
                 writer.write_all(&string_table.strings[value_index as usize].0.to_le_bytes())?;
                 writer.write_all(&[0; 4])?;
             },
             SymbolValue::Code { type_index, offset } => {
-                writer.write_all(&1u8.to_le_bytes())?;
+                writer.write_all(&[1])?;
                 writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
                 writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
             },
             SymbolValue::Data { type_index, offset } => {
-                writer.write_all(&2u8.to_le_bytes())?;
+                writer.write_all(&[2])?;
                 writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
                 writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
@@ -218,18 +310,70 @@ impl Symbol {
         }
         Ok(())
     }
+
+    pub fn deserialize(
+        mut reader: impl Read,
+        string_table: &StringTable,
+    ) -> Result<Self, DeserializationError> {
+        let name_offset = read_u32(&mut reader)?;
+        let name_index = string_table.offset_to_index[&name_offset];
+        read_u16(&mut reader)?;
+        match read_u8(&mut reader)? {
+            0 => {
+                read_u8(&mut reader)?;
+                let value_offset = read_u32(&mut reader)?;
+                let value_index = string_table.offset_to_index[&value_offset];
+                read_u32(&mut reader)?;
+                Ok(Symbol {
+                    name_index,
+                    value: SymbolValue::Metadata { value_index },
+                })
+            },
+            1 => {
+                let external = read_u8(&mut reader)?;
+                let type_offset = read_u32(&mut reader)?;
+                let type_index = string_table.offset_to_index[&type_offset];
+                let offset = read_u32(&mut reader)?;
+                Ok(Symbol {
+                    name_index,
+                    value: SymbolValue::Code {
+                        type_index,
+                        offset: if external == 1 { Some(offset) } else { None },
+                    },
+                })
+            },
+            2 => {
+                let external = read_u8(&mut reader)?;
+                let type_offset = read_u32(&mut reader)?;
+                let type_index = string_table.offset_to_index[&type_offset];
+                let offset = read_u32(&mut reader)?;
+                Ok(Symbol {
+                    name_index,
+                    value: SymbolValue::Data {
+                        type_index,
+                        offset: if external == 1 { Some(offset) } else { None },
+                    },
+                })
+            },
+            n => Err(DeserializationError::ReservedValue(
+                format!("can't understand symbol value kind {}", n)
+            )),
+        }
+    }
 }
 
 #[derive(Default)]
 pub struct StringTable {
     len: u32,
-    strings: Vec<(u32, String)>, // (offset, value)
-    lookup: HashMap<String, u32>, // value -> index
+    // FIXME: change String to Vec<u8>
+    pub strings: Vec<(u32, String)>, // (offset, value). can have dupe strings.
+    value_to_index: HashMap<String, u32>, // unable to have dupe keys.
+    offset_to_index: HashMap<u32, u32>,
 }
 
 impl StringTable {
     pub fn get_index_or_insert(&mut self, s: &str) -> u32 {
-        if let Some(&index) = self.lookup.get(s) {
+        if let Some(&index) = self.value_to_index.get(s) {
             index
         } else {
             self.insert(s.to_owned())
@@ -241,24 +385,53 @@ impl StringTable {
         self.strings[index as usize].0
     }
 
-    /// Returns index. s must not be in the table already!
+    /// Returns index. s may be in the table already. In this case, value_to_index is not updated
+    /// and continues to point to the first occurrence.
     fn insert(&mut self, s: String) -> u32 {
         let offset = self.len;
         let index = self.strings.len() as u32;
-        self.len += 4 + s.len() as u32; // entries are length-prefixed
+        let padding_len = s.len().wrapping_neg() & 0b11;
+        self.len += 4 + s.len() as u32 + padding_len as u32;
         self.strings.push((offset, s.clone()));
-        self.lookup.insert(s, index);
+        if !self.value_to_index.contains_key(&s) {
+            self.value_to_index.insert(s, index);
+        }
+        self.offset_to_index.insert(offset, index);
         index
     }
 
     pub fn serialize(&self, mut writer: impl Write) -> io::Result<()> {
-        for &(_, ref value) in &self.strings {
-            writer.write_all(&(value.len() as u32).to_le_bytes())?;
-            writer.write_all(value.as_bytes())?;
-            for _ in 0..(value.len().wrapping_neg() & 0b11) {
-                writer.write_all(&[0])?;
-            }
+        for &(_, ref s) in &self.strings {
+            write_len_prefixed_str(&mut writer, s)?;
         }
         Ok(())
+    }
+
+    pub fn deserialize(mut reader: impl Read, mut len: u32) -> Result<Self, DeserializationError> {
+        let mut table: Self = Default::default();
+        while len != 0 {
+            if len < 4 {
+                return Err(DeserializationError::PrematureEnd);
+            }
+            let s_len = read_u32(&mut reader)?;
+            len -= 4;
+            let padding_len = s_len.wrapping_neg() & 0b11;
+
+            if len < s_len + padding_len {
+                return Err(DeserializationError::PrematureEnd);
+            }
+            let mut buf = Vec::with_capacity(s_len as usize);
+            buf.resize(s_len as usize, 0);
+            reader.read_exact(&mut buf)?;
+            len -= s_len;
+            let s = String::from_utf8(buf).unwrap_or_else(ouch);
+            table.insert(s);
+
+            let mut buf = Vec::with_capacity(padding_len as usize);
+            buf.resize(padding_len as usize, 0);
+            reader.read_exact(&mut buf)?;
+            len -= padding_len;
+        }
+        Ok(table)
     }
 }

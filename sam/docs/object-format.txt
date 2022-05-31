@@ -39,7 +39,7 @@ string-table : chain of string[u32]
 % u32-aligned
 symbol-table : array[Nil] of struct
     name-string-offset : u32  % 0 means this symbol table entry is unused
-    _  : array[6] of u8  % reserved
+    _  : array[2] of u8  % reserved
     value : union[u8]
         0 metadata : struct
             _ : u8  % reserved
