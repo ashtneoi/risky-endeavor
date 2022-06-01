@@ -16,11 +16,6 @@ use std::env;
 use std::fs;
 use std::io::{self, prelude::*, SeekFrom};
 
-fn read_u32_at<F: Read + Seek>(mut f: F, pos: u64) -> io::Result<u32> {
-    f.seek(SeekFrom::Start(pos))?;
-    read_u32(f)
-}
-
 fn main() {
     let args: Vec<_> = env::args_os().collect();
     assert!(args.len() >= 2);

@@ -1,14 +1,10 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display};
-use std::io;
-use std::io::prelude::*;
-use std::process::exit;
+use std::io::{self, prelude::*, SeekFrom};
 
 // Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
 pub fn ouch<E: Display, X>(e: E) -> X {
     panic!("Error: {}", e);
-    // eprintln!("Error: {}", e);
-    // exit(1);
 }
 
 pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
@@ -81,6 +77,11 @@ pub fn read_u32<R: Read>(mut r: R) -> io::Result<u32> {
     let mut buf = [0; 4];
     r.read_exact(&mut buf)?;
     Ok(u32::from_le_bytes(buf))
+}
+
+pub fn read_u32_at<F: Read + Seek>(mut f: F, pos: u64) -> io::Result<u32> {
+    f.seek(SeekFrom::Start(pos))?;
+    read_u32(f)
 }
 
 pub fn read_len_prefixed_str(mut r: impl Read) -> io::Result<String> {
