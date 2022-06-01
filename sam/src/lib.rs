@@ -6,8 +6,9 @@ use std::process::exit;
 
 // Having this return ! makes the type checker say e.g. "expected `!`, found `usize`".
 pub fn ouch<E: Display, X>(e: E) -> X {
-    eprintln!("Error: {}", e);
-    exit(1);
+    panic!("Error: {}", e);
+    // eprintln!("Error: {}", e);
+    // exit(1);
 }
 
 pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
@@ -312,7 +313,7 @@ impl SymbolTable {
 #[derive(Clone, Copy, Debug)]
 pub struct Symbol {
     name_index: u32,
-    value: SymbolValue,
+    pub value: SymbolValue,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -327,11 +328,12 @@ impl Symbol {
         &string_table.strings[self.name_index as usize].1
     }
 
+    // TODO: Flip this and call it `is_defined`.
     pub fn is_external(&self) -> bool {
         match self.value {
             SymbolValue::Metadata { .. } => false,
             SymbolValue::Code { offset, .. }
-            | SymbolValue::Data { offset, .. } => offset.is_some(),
+            | SymbolValue::Data { offset, .. } => offset.is_none(),
         }
     }
 

@@ -2,6 +2,7 @@ use sam::{
     from_hex,
     ouch,
     parse_reg,
+    read_u32,
     Relocation,
     RelocationTable,
     RelocationValue,
@@ -215,7 +216,7 @@ fn assemble_line2(
         let name = &word["$".len()..];
         let name_index = strings.get_index_or_insert(name);
         if let Some(sym) = symbols.get(name_index) {
-            if sym.is_external() {
+            if !sym.is_external() {
                 return Err(AssemblerError::DuplicateLabel {
                     line_num,
                     col_num: word_pos,
@@ -772,8 +773,13 @@ fn main() {
     let args: Vec<_> = env::args_os().collect();
     assert_eq!(args.len(), 4);
     let load_address: u32 = from_hex(args[1].to_str().expect("load address must be valid Unicode"), 32).unwrap_or_else(ouch);
-    let input = fs::File::open(&args[2]).unwrap();
-    let mut output = fs::File::create(&args[3]).unwrap();
+    let mut input = fs::File::open(&args[2]).unwrap();
+    let mut output = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&args[3]).unwrap();
 
     output.write_all(&[
         // magic = dc867b72-87f7-47da-a770-752af3299a3c
@@ -822,6 +828,44 @@ fn main() {
     }
 
     let string_table_offset = output.stream_position().unwrap_or_else(ouch) as u32;
+
+    for reloc in &mut relocations.relocations {
+        let sym = reloc.symbol(&symbols);
+        if !sym.is_external() {
+            // Apply it.
+            match sym.value {
+                SymbolValue::Metadata { .. } =>
+                    panic!("Error: relocation references metadata symbol"),
+                SymbolValue::Code { offset: symbol_offset, .. } => {
+                    match reloc.value {
+                        RelocationValue::RelCodeBType => (),
+                        _ => unimplemented!(),
+                    }
+                    let imm13 = symbol_offset.unwrap().wrapping_sub(reloc.offset);
+                    if imm13 > 0x1FFF && imm13.wrapping_neg() > 0x1FFF {
+                        panic!("Error: branch target is too far away ({})", u32_to_hex(imm13));
+                    }
+                    output.seek(SeekFrom::Start(
+                        code_and_data_offset as u64 + reloc.offset as u64
+                    )).unwrap_or_else(ouch);
+                    let mut insn = read_u32(&mut output).unwrap_or_else(ouch);
+                    insn += imm13 << (31-12) >> (31-12+12) << 31;
+                    insn += imm13 << (31-10) >> (31-10+5) << 25;
+                    insn += imm13 << (31-4) >> (31-4+1) << 8;
+                    insn += imm13 << (31-11) >> (31-11+11) << 7;
+                    output.seek(SeekFrom::Start(
+                        code_and_data_offset as u64 + reloc.offset as u64
+                    )).unwrap_or_else(ouch);
+                    output.write_all(&insn.to_le_bytes()).unwrap_or_else(ouch);
+                    print!("Applied relocation {:?} at offset {}\n", &reloc, u32_to_hex(reloc.offset));
+                    reloc.value = RelocationValue::UnusedEntry;
+                },
+                SymbolValue::Data { .. } => unimplemented!(),
+            }
+        }
+    }
+
+    output.seek(SeekFrom::Start(string_table_offset as u64)).unwrap_or_else(ouch);
     strings.serialize(&mut output).unwrap_or_else(ouch);
 
     let symbol_table_offset = output.stream_position().unwrap_or_else(ouch) as u32;
