@@ -400,39 +400,54 @@ fn assemble_line2(
                 })?;
             Ok(4)
         },
-        // InsnType::J => {
-        //     insns.push(template);
-        //     let rd = parts.next().expect("missing rd");
-        //     let rd = parse_reg(rd).unwrap();
-        //     let imm_str = parts.next().expect("missing imm21");
-        //     let imm = if imm_str.starts_with('#')
-        //             || imm_str.starts_with('-') {
-        //         let imm = from_hex(imm_str, 21).unwrap();
-        //         if imm & 0x3 != 0 {
-        //             panic!("last two bits of imm21 must be 0");
-        //         }
-        //         imm
-        //     } else {
-        //         let label_addr = labels.get(imm_str).unwrap_or_else(
-        //             || panic!("unknown label '{}'", imm_str));
-        //         let displacement = label_addr.wrapping_sub(addr);
-        //         if (displacement as i32) < -0x10_0000
-        //                 || (displacement as i32) > 0xF_FFFF {
-        //             panic!(
-        //                 "displacement {} is too large \
-        //                     for 21-bit immediate",
-        //                 u32_to_hex(displacement),
-        //             );
-        //         }
-        //         displacement
-        //     };
-        //     insns[0] += rd << 7;
-        //     insns[0] += imm << (31-20) >> (31-20+20) << 31;
-        //     insns[0] += imm << (31-10) >> (31-10+1) << 21;
-        //     insns[0] += imm << (31-11) >> (31-11+11) << 20;
-        //     insns[0] += imm << (31-19) >> (31-19+12) << 12;
-        //     print_insns
-        // },
+        InsnType::J => {
+            let rd = parse_reg_here("rd", &mut chars)?;
+            let mut insn = template + (rd << 7);
+            skip_whitespace(&mut chars);
+            if chars.peek().is_none() {
+                return Err(AssemblerError::Syntax {
+                    line_num,
+                    col_num: chars.pos,
+                    msg: "missing jump target".to_owned(),
+                });
+            }
+            let target_pos = chars.pos;
+            let (_, target) = collect_word(&mut chars);
+            if is_identifier(&target) {
+                relocations.relocations.push(Relocation {
+                    offset: insn_offset,
+                    symbol_index: symbols.get_index_or_insert(
+                        strings.get_index_or_insert(&target),
+                        SymbolValue::Code {
+                            type_index: 0, // none
+                            offset: None,
+                        },
+                    ),
+                    value: RelocationValue::RelCodeJType,
+                });
+            } else {
+                let imm21 = from_hex(&target, 21).map_err(
+                    |e| AssemblerError::Syntax {line_num, col_num: target_pos, msg: e })?;
+
+                if imm21 & 0x3 != 0 {
+                    return Err(AssemblerError::Syntax {
+                        line_num,
+                        col_num: target_pos,
+                        msg: "low two bits of imm21 must be 0".to_owned(),
+                    });
+                }
+                insn += imm21 << (31-20) >> (31-20+20) << 31;
+                insn += imm21 << (31-10) >> (31-10+1) << 21;
+                insn += imm21 << (31-11) >> (31-11+11) << 20;
+                insn += imm21 << (31-19) >> (31-19+12) << 12;
+            }
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
         // InsnType::F => {
         //     insns.push(template);
         //     let pred = parts.next().expect("missing pred");
@@ -828,35 +843,17 @@ fn main() {
         let sym = reloc.symbol(&symbols);
         if !sym.is_external() {
             // Apply it.
-            match sym.value {
-                SymbolValue::Metadata { .. } =>
-                    panic!("Error: relocation references metadata symbol"),
-                SymbolValue::Code { offset: symbol_offset, .. } => {
-                    match reloc.value {
-                        RelocationValue::RelCodeBType => (),
-                        _ => unimplemented!(),
-                    }
-                    let imm13 = symbol_offset.unwrap().wrapping_sub(reloc.offset);
-                    if imm13 > 0x1FFF && imm13.wrapping_neg() > 0x1FFF {
-                        panic!("Error: branch target is too far away ({})", u32_to_hex(imm13));
-                    }
-                    output.seek(SeekFrom::Start(
-                        code_and_data_offset as u64 + reloc.offset as u64
-                    )).unwrap_or_else(ouch);
-                    let mut insn = read_u32(&mut output).unwrap_or_else(ouch);
-                    insn += imm13 << (31-12) >> (31-12+12) << 31;
-                    insn += imm13 << (31-10) >> (31-10+5) << 25;
-                    insn += imm13 << (31-4) >> (31-4+1) << 8;
-                    insn += imm13 << (31-11) >> (31-11+11) << 7;
-                    output.seek(SeekFrom::Start(
-                        code_and_data_offset as u64 + reloc.offset as u64
-                    )).unwrap_or_else(ouch);
-                    output.write_all(&insn.to_le_bytes()).unwrap_or_else(ouch);
-                    print!("Applied relocation {:?} at offset {}\n", &reloc, u32_to_hex(reloc.offset));
-                    reloc.value = RelocationValue::UnusedEntry;
-                },
-                SymbolValue::Data { .. } => unimplemented!(),
-            }
+            output.seek(SeekFrom::Start(
+                code_and_data_offset as u64 + reloc.offset as u64
+            )).unwrap_or_else(ouch);
+            let insn = read_u32(&mut output).unwrap_or_else(ouch);
+            let insn = reloc.apply(insn, &symbols).unwrap_or_else(ouch);
+            output.seek(SeekFrom::Start(
+                code_and_data_offset as u64 + reloc.offset as u64
+            )).unwrap_or_else(ouch);
+            output.write_all(&insn.to_le_bytes()).unwrap_or_else(ouch);
+            print!("Applied relocation {:?} at offset {}\n", &reloc, u32_to_hex(reloc.offset));
+            reloc.value = RelocationValue::UnusedEntry;
         }
     }
 

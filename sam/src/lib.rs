@@ -199,6 +199,7 @@ pub struct Relocation {
 pub enum RelocationValue {
     UnusedEntry,
     RelCodeBType,
+    RelCodeJType,
 }
 
 impl Relocation {
@@ -212,6 +213,7 @@ impl Relocation {
         let kind: u16 = match self.value {
             RelocationValue::UnusedEntry => 0,
             RelocationValue::RelCodeBType => 1,
+            RelocationValue::RelCodeJType => 2,
         };
         writer.write_all(&kind.to_le_bytes())?;
         writer.write_all(&[0; 6])?; // reserved
@@ -230,12 +232,56 @@ impl Relocation {
                 read_u16(&mut reader)?;
                 RelocationValue::RelCodeBType
             },
+            2 => {
+                read_u16(&mut reader)?;
+                RelocationValue::RelCodeJType
+            },
             n => return Err(DeserializationError::ReservedValue(
                 format!("can't understand relocation value kind {}", n)
             )),
         };
         read_u32(&mut reader)?;
         Ok(Relocation { offset, symbol_index, value })
+    }
+
+    pub fn apply(&self, insn: u32, symbol_table: &SymbolTable) -> Result<u32, String> {
+        let symbol = self.symbol(symbol_table);
+        assert!(!symbol.is_external());
+        match self.value {
+            RelocationValue::UnusedEntry => panic!("can't apply unused relocation"),
+            RelocationValue::RelCodeBType => {
+                let symbol_offset = match symbol.value {
+                    SymbolValue::Code { offset, .. } => offset,
+                    _ => panic!("symbol {} is not a code symbol", self.symbol_index),
+                };
+                let imm13 = symbol_offset.unwrap().wrapping_sub(self.offset);
+                if imm13 >= (1<<13) && imm13.wrapping_neg() >= (1<<13) {
+                    return Err(format!("branch target is too far away ({})", u32_to_hex(imm13)));
+                }
+                let mut insn = insn;
+                insn += imm13 << (31-12) >> (31-12+12) << 31;
+                insn += imm13 << (31-10) >> (31-10+5) << 25;
+                insn += imm13 << (31-4) >> (31-4+1) << 8;
+                insn += imm13 << (31-11) >> (31-11+11) << 7;
+                Ok(insn)
+            },
+            RelocationValue::RelCodeJType => {
+                let symbol_offset = match symbol.value {
+                    SymbolValue::Code { offset, .. } => offset,
+                    _ => panic!("symbol {} is not a code symbol", self.symbol_index),
+                };
+                let imm21 = symbol_offset.unwrap().wrapping_sub(self.offset);
+                if imm21 >= (1<<21) && imm21.wrapping_neg() >= (1<<21) {
+                    return Err(format!("branch target is too far away ({})", u32_to_hex(imm21)));
+                }
+                let mut insn = insn;
+                insn += imm21 << (31-20) >> (31-20+20) << 31;
+                insn += imm21 << (31-10) >> (31-10+1) << 21;
+                insn += imm21 << (31-11) >> (31-11+11) << 20;
+                insn += imm21 << (31-19) >> (31-19+12) << 12;
+                Ok(insn)
+            },
+        }
     }
 }
 
