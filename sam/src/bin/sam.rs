@@ -265,7 +265,7 @@ fn assemble_line2(
             });
         }
         let (_, imm) = collect_word(chars);
-        from_hex(&imm, 5).map_err(
+        from_hex(&imm, width).map_err(
             |e| AssemblerError::Syntax {line_num, col_num: pos, msg: e })
     };
 
@@ -320,19 +320,23 @@ fn assemble_line2(
                 })?;
             Ok(4)
         },
-        // InsnType::S => {
-        //     insns.push(template);
-        //     let rs2 = parts.next().expect("missing rs2");
-        //     let rs2 = parse_reg(rs2).unwrap();
-        //     let rs1 = parts.next().expect("missing rs1");
-        //     let rs1 = parse_reg(rs1).unwrap();
-        //     let imm = parts.next().expect("missing imm12");
-        //     let imm = from_hex(imm, 12).unwrap();
-        //     insns[0] += (rs1 << 15) + (rs2 << 20);
-        //     insns[0] += imm << (31-11) >> (31-11+5) << 25;
-        //     insns[0] += imm << (31-4) >> (31-4+0) << 7;
-        //     print_insns
-        // },
+        InsnType::S => {
+            let rs2 = parse_reg_here("rs2", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let rs1 = parse_reg_here("rs1", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let imm12 = parse_imm_here(12, &mut chars)?;
+            let mut insn = template;
+            insn += (rs1 << 15) + (rs2 << 20);
+            insn += imm12 << (31-11) >> (31-11+5) << 25;
+            insn += imm12 << (31-4) >> (31-4+0) << 7;
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
         InsnType::B => {
             let rs1 = parse_reg_here("rs1", &mut chars)?;
             skip_whitespace(&mut chars);
@@ -383,28 +387,19 @@ fn assemble_line2(
                 })?;
             Ok(4)
         },
-        // InsnType::U => {
-        //     insns.push(template);
-        //     let rd = parts.next().expect("missing rd");
-        //     let rd = parse_reg(rd).unwrap();
-        //     let imm_str = parts.next().expect("missing imm20");
-        //     let imm = if imm_str.starts_with('%') {
-        //         let label = &imm_str["%".len()..];
-        //         let len = *string_lens.get(label)
-        //             .unwrap_or_else(
-        //                 || panic!("unknown label '{}'", label))
-        //             as u32;
-        //         // counteract sign extension of addi immediate
-        //         (len >> 12) + ((len >> 11) & 1)
-        //     } else if let Some(&x) = labels.get(imm_str) {
-        //         // counteract sign extension of addi immediate
-        //         (x >> 12) + ((x >> 11) & 1)
-        //     } else {
-        //         from_hex(imm_str, 20).unwrap()
-        //     };
-        //     insns[0] += (rd << 7) + (imm << 12);
-        //     print_insns
-        // },
+        InsnType::U => {
+            let rd = parse_reg_here("rd", &mut chars)?;
+            skip_whitespace(&mut chars);
+            // TODO: Handle other kinds of immediates.
+            let imm20 = parse_imm_here(20, &mut chars)?;
+            let insn = template + (rd << 7) + (imm20 << 12);
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
         // InsnType::J => {
         //     insns.push(template);
         //     let rd = parts.next().expect("missing rd");
