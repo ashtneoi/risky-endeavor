@@ -5,6 +5,7 @@ use sam::{
     read_u8,
     read_u16,
     read_u32,
+    read_u32_at,
     RelocationTable,
     StringTable,
     Symbol,
