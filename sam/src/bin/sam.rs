@@ -198,8 +198,8 @@ fn assemble_line2(
     strings: &mut StringTable,
     symbols: &mut SymbolTable,
     relocations: &mut RelocationTable,
-    mut code_and_data: impl Write,
-) -> Result<usize, AssemblerError> {
+    code_and_data: &mut impl Write,
+) -> Result<u32, AssemblerError> {
     let mut chars = Peekable::new(line.char_indices());
 
     // FIXME: Column numbers in error messages are counted by code point, not extended grapheme
@@ -232,7 +232,7 @@ fn assemble_line2(
         });
         return Ok(0);
     }
-    let mnemonic = word;
+    let (mnemonic, mnemonic_pos) = (word, word_pos);
     let &(insn_type, template) = mnemonics.get(&mnemonic as &str)
         .ok_or_else(|| AssemblerError::Syntax {
             line_num,
@@ -270,14 +270,14 @@ fn assemble_line2(
             |e| AssemblerError::Syntax {line_num, col_num: pos, msg: e })
     };
 
-    match insn_type {
+    let insn_len = match insn_type {
         InsnType::X => {
             code_and_data.write_all(&template.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::R => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -286,12 +286,12 @@ fn assemble_line2(
             skip_whitespace(&mut chars);
             let rs2 = parse_reg_here("rs2", &mut chars)?;
             let insn = template + (rd << 7) + (rs1 << 15) + (rs2 << 20);
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::Sxli => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -300,12 +300,12 @@ fn assemble_line2(
             skip_whitespace(&mut chars);
             let imm5 = parse_imm_here(5, &mut chars)?;
             let insn = template + (rd << 7) + (rs1 << 15) + (imm5 << 20);
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::I => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -348,12 +348,12 @@ fn assemble_line2(
                     |e| AssemblerError::Syntax {line_num, col_num: imm12_pos, msg: e })?;
                 insn += imm12 << 20;
             }
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::S => {
             let rs2 = parse_reg_here("rs2", &mut chars)?;
@@ -365,12 +365,12 @@ fn assemble_line2(
             insn += (rs1 << 15) + (rs2 << 20);
             insn += imm12 << (31-11) >> (31-11+5) << 25;
             insn += imm12 << (31-4) >> (31-4+0) << 7;
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::B => {
             let rs1 = parse_reg_here("rs1", &mut chars)?;
@@ -388,6 +388,8 @@ fn assemble_line2(
             let target_pos = chars.pos;
             let (_, target) = collect_word(&mut chars);
             if is_identifier(&target) {
+                // DANGER: Currently, initial immediate must be zero or it might not overflow
+                // correctly. Fix this in Relocation::apply().
                 relocations.relocations.push(Relocation {
                     offset: insn_offset,
                     symbol_index: symbols.get_index_or_insert(
@@ -416,12 +418,12 @@ fn assemble_line2(
                 insn += imm13 << (31-4) >> (31-4+1) << 8;
                 insn += imm13 << (31-11) >> (31-11+11) << 7;
             }
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::U => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -429,12 +431,12 @@ fn assemble_line2(
             // TODO: Handle other kinds of immediates.
             let imm20 = parse_imm_here(20, &mut chars)?;
             let insn = template + (rd << 7) + (imm20 << 12);
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::J => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -450,6 +452,8 @@ fn assemble_line2(
             let target_pos = chars.pos;
             let (_, target) = collect_word(&mut chars);
             if is_identifier(&target) {
+                // DANGER: Currently, initial immediate must be zero or it might not overflow
+                // correctly. Fix this in Relocation::apply().
                 relocations.relocations.push(Relocation {
                     offset: insn_offset,
                     symbol_index: symbols.get_index_or_insert(
@@ -478,12 +482,12 @@ fn assemble_line2(
                 insn += imm21 << (31-11) >> (31-11+11) << 20;
                 insn += imm21 << (31-19) >> (31-19+12) << 12;
             }
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         // InsnType::F => {
         //     insns.push(template);
@@ -501,12 +505,12 @@ fn assemble_line2(
             skip_whitespace(&mut chars);
             let csr = parse_imm_here(12, &mut chars)?;
             let insn = template + (rd << 7) + (rs1 << 15) + (csr << 20);
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
         InsnType::Ci => {
             let rd = parse_reg_here("rd", &mut chars)?;
@@ -515,15 +519,166 @@ fn assemble_line2(
             skip_whitespace(&mut chars);
             let csr = parse_imm_here(12, &mut chars)?;
             let insn = template + (rd << 7) + (imm5 << 15) + (csr << 20);
-            code_and_data.write(&insn.to_le_bytes())
+            code_and_data.write_all(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
                     inner: e,
                 })?;
-            Ok(4)
+            4
         },
-        x => unimplemented!("insn_type {:?}", x),
+        InsnType::P => {
+            if mnemonic == "li" {
+                let rd = parse_reg_here("rd", &mut chars)?;
+                skip_whitespace(&mut chars);
+                let imm32_pos = chars.pos;
+                let (_, imm32) = collect_word(&mut chars);
+                let is_ident = is_identifier(&imm32);
+                let mut imm20 = 0;
+                let mut imm12 = 0;
+                if !is_ident {
+                    let imm32 = from_hex(&imm32, 32).map_err(
+                        |e| AssemblerError::Syntax {line_num, col_num: imm32_pos, msg: e })?;
+                    imm20 = (imm32 >> 12).wrapping_add((imm32 >> 11) & 1) & 0xF_FFFF;
+                    imm12 = imm32 & 0xFFF;
+                }
+                let mut extra_insn_offset: u32 = 0;
+                if is_ident {
+                    relocations.relocations.push(Relocation {
+                        offset: insn_offset + extra_insn_offset,
+                        symbol_index: symbols.get_index_or_insert(
+                            strings.get_index_or_insert(&imm32),
+                            SymbolValue::Code { // FIXME: doesn't need to be code
+                                external: false,
+                                type_index: 0, // none
+                                offset: None,
+                            },
+                        ),
+                        value: RelocationValue::RelUType,
+                    });
+                    extra_insn_offset += assemble_line2(
+                        mnemonics,
+                        line_num,
+                        &format!("auipc x{} {}", rd, u32_to_hex(imm20)),
+                        insn_offset + extra_insn_offset,
+                        &mut *strings,
+                        &mut *symbols,
+                        &mut *relocations,
+                        &mut *code_and_data,
+                    )?;
+                } else {
+                    extra_insn_offset += assemble_line2(
+                        mnemonics,
+                        line_num,
+                        &format!("lui x{} {}", rd, u32_to_hex(imm20)),
+                        insn_offset + extra_insn_offset,
+                        &mut *strings,
+                        &mut *symbols,
+                        &mut *relocations,
+                        &mut *code_and_data,
+                    )?;
+                }
+                if is_ident {
+                    // Relative to auipc's offset, addi's offset is extra_insn_offset too small. We
+                    // have to compensate by adding that number.
+                    imm12 = imm12.wrapping_add(extra_insn_offset) & 0xFFF;
+                    relocations.relocations.push(Relocation {
+                        offset: insn_offset + extra_insn_offset,
+                        symbol_index: symbols.get_index_or_insert(
+                            strings.get_index_or_insert(&imm32),
+                            SymbolValue::Code { // FIXME: doesn't need to be code
+                                external: false,
+                                type_index: 0, // none
+                                offset: None,
+                            },
+                        ),
+                        value: RelocationValue::RelIType,
+                    });
+                }
+                extra_insn_offset += assemble_line2(
+                    mnemonics,
+                    line_num,
+                    &format!("addi x{} x{} {}", rd, rd, u32_to_hex(imm12)),
+                    insn_offset + extra_insn_offset,
+                    &mut *strings,
+                    &mut *symbols,
+                    &mut *relocations,
+                    &mut *code_and_data,
+                )?;
+                extra_insn_offset
+            } else if mnemonic == ".utf8" {
+                let opening_quote_pos = chars.pos;
+                if let Some((pos, c)) = chars.next() {
+                    if c != '"' {
+                        return Err(AssemblerError::Syntax {
+                            line_num,
+                            col_num: pos,
+                            msg: "missing '\"'".to_owned(),
+                        });
+                    }
+                } else {
+                    return Err(AssemblerError::Syntax {
+                        line_num,
+                        col_num: chars.pos,
+                        msg: "missing string".to_owned(),
+                    });
+                }
+                let mut s = String::new();
+                while let Some((_, c)) = chars.next() {
+                    if c == '"' {
+                        break;
+                    } else if c == '\\' {
+                        if let Some((_, c)) = chars.next() {
+                            s.push(c);
+                        } else {
+                            return Err(AssemblerError::Syntax {
+                                line_num,
+                                col_num: chars.pos,
+                                msg: "incomplete backslash escape".to_owned(),
+                            });
+                        }
+                    } else {
+                        s.push(c);
+                    }
+                }
+                for _ in 0..(s.len().wrapping_neg() & 0b11) {
+                    s.push('\0'); // conveniently 1 byte
+                }
+                code_and_data.write_all(s.as_bytes())
+                    .map_err(|e| AssemblerError::Write {
+                        line_num,
+                        inner: e,
+                    })?;
+                if let Some(&(_, c)) = chars.peek() {
+                    if !c.is_whitespace() {
+                        return Err(AssemblerError::Syntax {
+                            line_num,
+                            col_num: chars.pos,
+                            msg: "trailing characters after closing '\"'".to_owned(),
+                        });
+                    }
+                }
+                s.len() as u32
+            } else {
+                return Err(AssemblerError::Syntax {
+                    line_num,
+                    col_num: mnemonic_pos,
+                    msg: format!("unknown mnemonic {:?}", mnemonic),
+                });
+            }
+        },
+        x => todo!("insn_type {:?}", x),
+    };
+
+    skip_whitespace(&mut chars);
+    if chars.peek().is_some() {
+        return Err(AssemblerError::Syntax {
+            line_num,
+            col_num: chars.pos,
+            msg: "too many arguments".to_owned(),
+        });
     }
+
+    Ok(insn_len)
 }
 
 // fn assemble_line(
@@ -821,6 +976,8 @@ fn main() {
     mnemonics.insert(  "mret", (InsnType::X,    0x3020_0073));
     mnemonics.insert(   "wfi", (InsnType::X,    0x1050_0073));
     mnemonics.insert(    "li", (InsnType::P,              0));
+    mnemonics.insert( ".utf8", (InsnType::P,              0));
+    // TODO: .extern
     let mnemonics = mnemonics;
 
     let args: Vec<_> = env::args_os().collect();
@@ -885,6 +1042,7 @@ fn main() {
     for reloc in &mut relocations.relocations {
         let sym = reloc.symbol(&symbols);
         if !sym.is_external() {
+            print!("Applying relocation {:?} at offset {}\n", &reloc, u32_to_hex(reloc.offset));
             // Apply it.
             output.seek(SeekFrom::Start(
                 code_and_data_offset as u64 + reloc.offset as u64
@@ -895,7 +1053,6 @@ fn main() {
                 code_and_data_offset as u64 + reloc.offset as u64
             )).unwrap_or_else(ouch);
             output.write_all(&insn.to_le_bytes()).unwrap_or_else(ouch);
-            print!("Applied relocation {:?} at offset {}\n", &reloc, u32_to_hex(reloc.offset));
             reloc.value = RelocationValue::UnusedEntry;
         }
     }

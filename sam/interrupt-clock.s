@@ -77,7 +77,7 @@ $loop
 
 ;;;
 $hi_there
-.utf8 hi there!
+.utf8 "hi there!"
 
 ;;;
 $add_1sec
@@ -239,13 +239,29 @@ $die_from_exception
             ; write mcause
             addi a0 x0 #40 ; @
             jal ra write
-            addi a0 x0 #6D ; m
+            addi a0 x0 #65 ; e
             jal ra write
             addi a0 x0 #23 ; #
             jal ra write
             csrrs a0 x0 #342 ; mcause
             jal ra write_hex_u32
+
+            ; write mepc
+            addi a0 x0 #23 ; #
+            jal ra write
+            csrrs a0 x0 #341 ; mepc
+            jal ra write_hex_u32
+
+            ; write mtval
+            addi a0 x0 #23 ; #
+            jal ra write
+            csrrs a0 x0 #343 ; mtval
+            jal ra write_hex_u32
+
             jal ra crlf
+
+            jal x0 #0
+
             jal x0 shutdown
 
 ;;;
@@ -398,7 +414,7 @@ $write_str
             addi s0 a0 #0 ; len
             addi s1 a1 #0 ; string
             add s2 a1 a0 ; string end
-            auipc ra #0
+            auipc ra #0 ; set up for tail call to write_str_loop
             addi ra ra #8
 $write_str_loop
             beq s1 s2 write_str_done

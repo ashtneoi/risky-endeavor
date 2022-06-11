@@ -35,7 +35,6 @@ pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
         };
     }
     if is_neg {
-        assert!(width < 32);
         if n >= 1 << (width-1) {
             return Err("number is too large to negate".to_string());
         }
@@ -274,8 +273,8 @@ impl Relocation {
                     return Err(format!("branch target is too far away ({})", u32_to_hex(imm13)));
                 }
                 let mut insn = insn;
-                // FIXME: Permit initial immediate to be nonzero. (Currently
-                // it wouldn't overflow correctly.)
+                // FIXME: Permit initial immediate to be nonzero. (Currently it wouldn't overflow
+                // correctly.)
                 insn += imm13 << (31-12) >> (31-12+12) << 31;
                 insn += imm13 << (31-10) >> (31-10+5) << 25;
                 insn += imm13 << (31-4) >> (31-4+1) << 8;
@@ -306,11 +305,17 @@ impl Relocation {
                     | SymbolValue::Data { offset, .. } => offset,
                     _ => panic!("symbol {} is not a code or data symbol", self.symbol_index),
                 };
-                let imm20 = symbol_offset.unwrap().wrapping_sub(self.offset);
-                if imm20 >= (1<<20) && imm20.wrapping_neg() >= (1<<20) {
-                    return Err(format!("target address is too far away ({})", u32_to_hex(imm20)));
-                }
-                let insn = insn + (imm20 << 12);
+                // dis = displacement (what?)
+                let dis32 = symbol_offset.unwrap().wrapping_sub(self.offset);
+                let dis20 = (dis32 >> 12).wrapping_add((dis32 >> 11) & 1) & 0xF_FFFF;
+                let imm20 = (insn >> 12).wrapping_add(dis20) & 0xF_FFFF;
+                println!(
+                    "dis32 = {}, dis20 = {}, imm20 = {}",
+                    u32_to_hex(dis32),
+                    u32_to_hex(dis20),
+                    u32_to_hex(imm20),
+                );
+                let insn = (insn & 0xFFF) + (imm20 << 12);
                 Ok(insn)
             },
             RelocationValue::RelIType => {
@@ -319,11 +324,14 @@ impl Relocation {
                     | SymbolValue::Data { offset, .. } => offset,
                     _ => panic!("symbol {} is not a code or data symbol", self.symbol_index),
                 };
-                let imm12 = symbol_offset.unwrap().wrapping_sub(self.offset);
-                if imm12 >= (1<<12) && imm12.wrapping_neg() >= (1<<12) {
-                    return Err(format!("target address is too far away ({})", u32_to_hex(imm12)));
-                }
-                let insn = insn + (imm12 << 20);
+                let dis12 = symbol_offset.unwrap().wrapping_sub(self.offset) & 0xFFF;
+                let imm12 = (insn >> 20).wrapping_add(dis12) & 0xFFF;
+                println!(
+                    "dis12 = {}, imm12 = {}",
+                    u32_to_hex(dis12),
+                    u32_to_hex(imm12),
+                );
+                let insn = (insn & 0xF_FFFF) + (imm12 << 20);
                 Ok(insn)
             },
         }
