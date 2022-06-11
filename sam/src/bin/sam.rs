@@ -216,7 +216,7 @@ fn assemble_line2(
         let name = &word["$".len()..];
         let name_index = strings.get_index_or_insert(name);
         if let Some(sym) = symbols.get(name_index) {
-            if !sym.is_external() {
+            if sym.is_defined() {
                 return Err(AssemblerError::DuplicateLabel {
                     line_num,
                     col_num: word_pos,
@@ -226,6 +226,7 @@ fn assemble_line2(
         }
         // TODO: we don't know it's code. add it to a pending set then choose symbol type based on insn/directive that follows
         symbols.insert(name_index, SymbolValue::Code {
+            external: false,
             type_index: 0, // none
             offset: Some(insn_offset),
         });
@@ -358,6 +359,7 @@ fn assemble_line2(
                     symbol_index: symbols.get_index_or_insert(
                         strings.get_index_or_insert(&target),
                         SymbolValue::Code {
+                            external: false,
                             type_index: 0, // none
                             offset: None,
                         },
@@ -419,6 +421,7 @@ fn assemble_line2(
                     symbol_index: symbols.get_index_or_insert(
                         strings.get_index_or_insert(&target),
                         SymbolValue::Code {
+                            external: false,
                             type_index: 0, // none
                             offset: None,
                         },

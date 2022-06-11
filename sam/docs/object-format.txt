@@ -49,12 +49,18 @@ symbol-table : array[Nil] of struct
         end
         % TODO: why does distinction between code and data symbols matter?
         1 code : struct
-            external : bool[u8]
+            flags : bitmap[u8]
+                0 external : bool
+                1 defined : bool
+            end
             type-string-offset : u32
             offset : u32
         end
         2 data : struct
-            external : bool[u8]
+            flags : bitmap[u8]
+                0 external : bool
+                1 defined : bool
+            end
             type-string-offset : u32
             offset : u32
         end

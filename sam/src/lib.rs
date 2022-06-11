@@ -259,6 +259,8 @@ impl Relocation {
                     return Err(format!("branch target is too far away ({})", u32_to_hex(imm13)));
                 }
                 let mut insn = insn;
+                // FIXME: Permit initial immediate to be nonzero. (Currently
+                // it wouldn't overflow correctly.)
                 insn += imm13 << (31-12) >> (31-12+12) << 31;
                 insn += imm13 << (31-10) >> (31-10+5) << 25;
                 insn += imm13 << (31-4) >> (31-4+1) << 8;
@@ -366,8 +368,8 @@ pub struct Symbol {
 #[derive(Clone, Copy, Debug)]
 pub enum SymbolValue {
     Metadata { value_index: u32 },
-    Code { type_index: u32, offset: Option<u32> },
-    Data { type_index: u32, offset: Option<u32> },
+    Code { external: bool, type_index: u32, offset: Option<u32> },
+    Data { external: bool, type_index: u32, offset: Option<u32> },
 }
 
 impl Symbol {
@@ -375,12 +377,19 @@ impl Symbol {
         &string_table.strings[self.name_index as usize].1
     }
 
-    // TODO: Flip this and call it `is_defined`.
+    pub fn is_defined(&self) -> bool {
+        match self.value {
+            SymbolValue::Metadata { .. } => true,
+            SymbolValue::Code { offset, .. }
+            | SymbolValue::Data { offset, .. } => offset.is_some(),
+        }
+    }
+
     pub fn is_external(&self) -> bool {
         match self.value {
             SymbolValue::Metadata { .. } => false,
-            SymbolValue::Code { offset, .. }
-            | SymbolValue::Data { offset, .. } => offset.is_none(),
+            SymbolValue::Code { external, .. }
+            | SymbolValue::Data { external, .. } => external,
         }
     }
 
@@ -394,15 +403,17 @@ impl Symbol {
                 writer.write_all(&string_table.strings[value_index as usize].0.to_le_bytes())?;
                 writer.write_all(&[0; 4])?;
             },
-            SymbolValue::Code { type_index, offset } => {
+            SymbolValue::Code { external, type_index, offset } => {
                 writer.write_all(&[1])?;
-                writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
+                let flags = ((self.is_defined() as u8) << 1) + ((external as u8) << 0);
+                writer.write_all(&[flags])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
                 writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
             },
-            SymbolValue::Data { type_index, offset } => {
+            SymbolValue::Data { external, type_index, offset } => {
                 writer.write_all(&[2])?;
-                writer.write_all(&[if offset.is_some() { 1 } else { 0 }])?;
+                let flags = ((self.is_defined() as u8) << 1) + ((external as u8) << 0);
+                writer.write_all(&[flags])?;
                 writer.write_all(&string_table.strings[type_index as usize].0.to_le_bytes())?;
                 writer.write_all(&offset.unwrap_or(0).to_le_bytes())?;
             },
@@ -419,38 +430,52 @@ impl Symbol {
         read_u16(&mut reader)?;
         match read_u8(&mut reader)? {
             0 => {
-                read_u8(&mut reader)?;
+                if read_u8(&mut reader)? != 0 {
+                    return Err(DeserializationError::ReservedField(
+                        "metadata/#0 is reserved but nonzero".to_owned()
+                    ));
+                }
                 let value_offset = read_u32(&mut reader)?;
                 let value_index = string_table.offset_to_index[&value_offset];
-                read_u32(&mut reader)?;
+                if read_u32(&mut reader)? != 0 {
+                    return Err(DeserializationError::ReservedField(
+                        "metadata/#5 is reserved but nonzero".to_owned()
+                    ));
+                }
                 Ok(Symbol {
                     name_index,
                     value: SymbolValue::Metadata { value_index },
                 })
             },
             1 => {
-                let external = read_u8(&mut reader)?;
+                let flags = read_u8(&mut reader)?;
+                let external = flags & 1 != 0;
+                let defined = flags & 2 != 0;
                 let type_offset = read_u32(&mut reader)?;
                 let type_index = string_table.offset_to_index[&type_offset];
                 let offset = read_u32(&mut reader)?;
                 Ok(Symbol {
                     name_index,
                     value: SymbolValue::Code {
+                        external,
                         type_index,
-                        offset: if external == 1 { Some(offset) } else { None },
+                        offset: if defined { Some(offset) } else { None },
                     },
                 })
             },
             2 => {
-                let external = read_u8(&mut reader)?;
+                let flags = read_u8(&mut reader)?;
+                let external = flags & 1 != 0;
+                let defined = flags & 2 != 0;
                 let type_offset = read_u32(&mut reader)?;
                 let type_index = string_table.offset_to_index[&type_offset];
                 let offset = read_u32(&mut reader)?;
                 Ok(Symbol {
                     name_index,
                     value: SymbolValue::Data {
+                        external,
                         type_index,
-                        offset: if external == 1 { Some(offset) } else { None },
+                        offset: if defined { Some(offset) } else { None },
                     },
                 })
             },
