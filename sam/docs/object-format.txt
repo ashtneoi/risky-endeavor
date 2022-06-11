@@ -78,6 +78,9 @@ relocation-table : array[Nil] of struct
         2 rel-code-j-type : struct
             _ : u16
         end
+        3 rel-u-type : struct
+            _ : u16
+        end
     end
     _ : u32
 end

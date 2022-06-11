@@ -311,9 +311,43 @@ fn assemble_line2(
             let rd = parse_reg_here("rd", &mut chars)?;
             skip_whitespace(&mut chars);
             let rs1 = parse_reg_here("rs1", &mut chars)?;
+            let mut insn = template + (rd << 7) + (rs1 << 15);
             skip_whitespace(&mut chars);
-            let imm12 = parse_imm_here(12, &mut chars)?;
-            let insn = template + (rd << 7) + (rs1 << 15) + (imm12 << 20);
+            if chars.peek().is_none() {
+                return Err(AssemblerError::Syntax {
+                    line_num,
+                    col_num: chars.pos,
+                    msg: "missing imm12".to_owned(),
+                });
+            }
+            let imm12_pos = chars.pos;
+            let (_, imm12) = collect_word(&mut chars);
+            if is_identifier(&imm12) {
+                if !(mnemonic == "addi" || mnemonic == "jalr") {
+                    return Err(AssemblerError::Syntax {
+                        line_num,
+                        col_num: imm12_pos,
+                        msg: "I-type instructions with identifier immediate must be addi or jalr"
+                            .to_owned(),
+                    });
+                }
+                relocations.relocations.push(Relocation {
+                    offset: insn_offset,
+                    symbol_index: symbols.get_index_or_insert(
+                        strings.get_index_or_insert(&imm12),
+                        SymbolValue::Code { // FIXME: i guess we don't need both code and data?
+                            external: false,
+                            type_index: 0, // none
+                            offset: None,
+                        },
+                    ),
+                    value: RelocationValue::RelIType,
+                });
+            } else {
+                let imm12 = from_hex(&imm12, 12).map_err(
+                    |e| AssemblerError::Syntax {line_num, col_num: imm12_pos, msg: e })?;
+                insn += imm12 << 20;
+            }
             code_and_data.write(&insn.to_le_bytes())
                 .map_err(|e| AssemblerError::Write {
                     line_num,
@@ -460,28 +494,34 @@ fn assemble_line2(
         //     insns[0] += (pred << 24) + (succ << 20);
         //     print_insns
         // },
-        // InsnType::C => {
-        //     insns.push(template);
-        //     let rd = parts.next().expect("missing rd");
-        //     let rd = parse_reg(rd).unwrap();
-        //     let rs1 = parts.next().expect("missing rs1");
-        //     let rs1 = parse_reg(rs1).unwrap();
-        //     let csr = parts.next().expect("missing csr");
-        //     let csr = from_hex(csr, 12).unwrap();
-        //     insns[0] += (rd << 7) + (rs1 << 15) + (csr << 20);
-        //     print_insns
-        // },
-        // InsnType::Ci => {
-        //     insns.push(template);
-        //     let rd = parts.next().expect("missing rd");
-        //     let rd = parse_reg(rd).unwrap();
-        //     let uimm = parts.next().expect("missing uimm5");
-        //     let uimm = from_hex(uimm, 5).unwrap();
-        //     let csr = parts.next().expect("missing csr");
-        //     let csr = from_hex(csr, 12).unwrap();
-        //     insns[0] += (rd << 7) + (uimm << 15) + (csr << 20);
-        //     print_insns
-        // },
+        InsnType::C => {
+            let rd = parse_reg_here("rd", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let rs1 = parse_reg_here("rs1", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let csr = parse_imm_here(12, &mut chars)?;
+            let insn = template + (rd << 7) + (rs1 << 15) + (csr << 20);
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
+        InsnType::Ci => {
+            let rd = parse_reg_here("rd", &mut chars)?;
+            skip_whitespace(&mut chars);
+            let imm5 = parse_imm_here(5, &mut chars)?;
+            skip_whitespace(&mut chars);
+            let csr = parse_imm_here(12, &mut chars)?;
+            let insn = template + (rd << 7) + (imm5 << 15) + (csr << 20);
+            code_and_data.write(&insn.to_le_bytes())
+                .map_err(|e| AssemblerError::Write {
+                    line_num,
+                    inner: e,
+                })?;
+            Ok(4)
+        },
         x => unimplemented!("insn_type {:?}", x),
     }
 }

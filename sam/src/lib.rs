@@ -139,6 +139,7 @@ pub fn parse_reg(s: &str) -> Result<u32, String> {
 pub enum DeserializationError {
     Io(io::Error),
     ReservedValue(String),
+    ReservedField(String),
     PrematureEnd,
     DuplicateItem(String),
 }
@@ -154,6 +155,7 @@ impl Display for DeserializationError {
         match *self {
             Self::Io(ref e) => <io::Error as Display>::fmt(e, f),
             Self::ReservedValue(ref s) => write!(f, "reserved value; {}", s),
+            Self::ReservedField(ref s) => write!(f, "reserved field; {}", s),
             Self::PrematureEnd => write!(f, "premature end"),
             Self::DuplicateItem(ref s) => write!(f, "duplicate item; {}", s),
         }
@@ -200,6 +202,9 @@ pub enum RelocationValue {
     UnusedEntry,
     RelCodeBType,
     RelCodeJType,
+    RelUType,
+    RelIType,
+    // TODO: AbsUType and AbsIType
 }
 
 impl Relocation {
@@ -214,6 +219,8 @@ impl Relocation {
             RelocationValue::UnusedEntry => 0,
             RelocationValue::RelCodeBType => 1,
             RelocationValue::RelCodeJType => 2,
+            RelocationValue::RelUType => 3,
+            RelocationValue::RelIType => 4,
         };
         writer.write_all(&kind.to_le_bytes())?;
         writer.write_all(&[0; 6])?; // reserved
@@ -235,6 +242,14 @@ impl Relocation {
             2 => {
                 read_u16(&mut reader)?;
                 RelocationValue::RelCodeJType
+            },
+            3 => {
+                read_u16(&mut reader)?;
+                RelocationValue::RelUType
+            },
+            4 => {
+                read_u16(&mut reader)?;
+                RelocationValue::RelIType
             },
             n => return Err(DeserializationError::ReservedValue(
                 format!("can't understand relocation value kind {}", n)
@@ -277,10 +292,38 @@ impl Relocation {
                     return Err(format!("branch target is too far away ({})", u32_to_hex(imm21)));
                 }
                 let mut insn = insn;
+                // FIXME: Permit initial immediate to be nonzero. (Currently
+                // it wouldn't overflow correctly.)
                 insn += imm21 << (31-20) >> (31-20+20) << 31;
                 insn += imm21 << (31-10) >> (31-10+1) << 21;
                 insn += imm21 << (31-11) >> (31-11+11) << 20;
                 insn += imm21 << (31-19) >> (31-19+12) << 12;
+                Ok(insn)
+            },
+            RelocationValue::RelUType => {
+                let symbol_offset = match symbol.value {
+                    SymbolValue::Code { offset, .. }
+                    | SymbolValue::Data { offset, .. } => offset,
+                    _ => panic!("symbol {} is not a code or data symbol", self.symbol_index),
+                };
+                let imm20 = symbol_offset.unwrap().wrapping_sub(self.offset);
+                if imm20 >= (1<<20) && imm20.wrapping_neg() >= (1<<20) {
+                    return Err(format!("target address is too far away ({})", u32_to_hex(imm20)));
+                }
+                let insn = insn + (imm20 << 12);
+                Ok(insn)
+            },
+            RelocationValue::RelIType => {
+                let symbol_offset = match symbol.value {
+                    SymbolValue::Code { offset, .. }
+                    | SymbolValue::Data { offset, .. } => offset,
+                    _ => panic!("symbol {} is not a code or data symbol", self.symbol_index),
+                };
+                let imm12 = symbol_offset.unwrap().wrapping_sub(self.offset);
+                if imm12 >= (1<<12) && imm12.wrapping_neg() >= (1<<12) {
+                    return Err(format!("target address is too far away ({})", u32_to_hex(imm12)));
+                }
+                let insn = insn + (imm12 << 20);
                 Ok(insn)
             },
         }
