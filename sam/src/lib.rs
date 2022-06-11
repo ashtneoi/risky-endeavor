@@ -38,7 +38,7 @@ pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
         if n >= 1 << (width-1) {
             return Err("number is too large to negate".to_string());
         }
-        n = (!n).wrapping_add(1);
+        n = (!n).wrapping_add(1) & ((1 << width) - 1);
     }
     Ok(n)
 }
