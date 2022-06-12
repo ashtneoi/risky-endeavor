@@ -8,7 +8,7 @@ pub fn ouch<E: Display, X>(e: E) -> X {
 }
 
 pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
-    assert!(width <= 32);
+    assert!(1 <= width && width <= 32);
     let is_neg = s.starts_with('-');
     let s = if is_neg { &s["-".len()..] } else { s };
     if !s.starts_with('#') {
@@ -23,24 +23,76 @@ pub fn from_hex(s: &str, width: u32) -> Result<u32, String> {
         if let '\'' | '_' = c {
             continue;
         }
-        if n >= 1 << (width-4) {
-            return Err(format!("number is larger than {} bits", width));
-        }
-        n <<= 4;
-        n += match c {
+        let digit = match c {
             '0'..='9' => c as u32 - '0' as u32,
             'A'..='F' => c as u32 - 'A' as u32 + 10,
             'a'..='f' => c as u32 - 'a' as u32 + 10,
             _ => return Err(format!("invalid hex digit '{}'", c)),
         };
+        // n has two invariants we need to maintain here: it can't overflow during the left shift
+        // and it can't exceed the specified width.
+        if n >= 1 << 28 {
+            return Err("number is wider than 32 bits".to_owned());
+        }
+        n <<= 4;
+        n += digit;
+        if width < 32 && n >= 1 << width {
+            return Err(format!("number is wider than {} bits", width));
+        }
+
+        // // If width > 28, we have to detect these errors ahead of time or else check for shift
+        // // overflow after the fact, so we just do it ahead of time in every case.
+        // if width < 4 {
+        //     if n == 0 {
+        //         // If this digit is nonzero, it must be the last digit and must fit in width.
+        //         if (32 - digit.leading_zeros()) > width {
+        //             return Err(format!("number is wider than {} bits", width));
+        //         }
+        //     } else if n << 4 >= 1 << width {
+        //         return Err(format!("number is wider than {} bits", width));
+        //     }
+        // } else if n >= 1 << (width - 4) {
+        //     return Err(format!("number is wider than {} bits", width));
+        // }
+        // n <<= 4;
+        // n += digit;
     }
     if is_neg {
-        if n >= 1 << (width-1) {
-            return Err("number is too large to negate".to_string());
+        if n >= 1 << (width - 1) {
+            return Err("number is too wide to negate".to_string());
         }
         n = (!n).wrapping_add(1) & ((1 << width) - 1);
     }
     Ok(n)
+}
+
+#[test]
+fn test_from_hex() {
+    assert!(from_hex("", 2).is_err());
+
+    assert_eq!(from_hex("#3", 2), Ok(3));
+    assert!(from_hex("#4", 2).is_err());
+    println!("{:?}", from_hex("#11", 2));
+    assert!(from_hex("#11", 2).is_err());
+
+    assert_eq!(from_hex("-#1", 2), Ok(3));
+    assert!(from_hex("-#2", 2).is_err());
+    assert!(from_hex("-#11", 2).is_err());
+
+    assert_eq!(from_hex("#F", 4), Ok(0xF));
+    assert!(from_hex("#10", 4).is_err());
+
+    assert_eq!(from_hex("#FF2", 12), Ok(0xFF2));
+    assert_eq!(from_hex("#0000'0000'0FF2", 12), Ok(0xFF2));
+    assert!(from_hex("#F000", 12).is_err());
+
+    assert_eq!(from_hex("#1234abcd", 31), Ok(0x1234_ABCD));
+    assert!(from_hex("#8234abcd", 31).is_err());
+
+    assert_eq!(from_hex("#1234abcd", 32), Ok(0x1234_ABCD));
+    assert_eq!(from_hex("#00001234abcd", 32), Ok(0x1234_ABCD));
+    assert_eq!(from_hex("#cd", 32), Ok(0xCD));
+    assert!(from_hex("#f1234abcd", 32).is_err());
 }
 
 pub fn u32_to_hex(x: u32) -> String {
